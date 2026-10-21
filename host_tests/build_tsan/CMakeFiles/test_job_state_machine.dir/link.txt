@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names -fsanitize=thread CMakeFiles/test_job_state_machine.dir/test_job_state_machine.cpp.o -o test_job_state_machine  libijpd_core.a

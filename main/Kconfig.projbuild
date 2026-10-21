@@ -1,0 +1,16 @@
+menu "IJPD Printer"
+
+    config IJPD_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+            STA 模式接入的 AP 名称。留空则 Wi-Fi 不启动（BLE 通道仍可用）。
+            注意：正式配网方式为开放决策（docs/hardware_questions.md Q6）。
+
+    config IJPD_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+        help
+            不会出现在日志中；sdkconfig 为生成文件，不应提交到仓库。
+
+endmenu

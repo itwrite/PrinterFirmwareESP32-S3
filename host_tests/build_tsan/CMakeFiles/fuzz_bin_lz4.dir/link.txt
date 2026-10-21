@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names -fsanitize=thread CMakeFiles/fuzz_bin_lz4.dir/fuzz_bin_lz4.cpp.o -o fuzz_bin_lz4  libijpd_core.a

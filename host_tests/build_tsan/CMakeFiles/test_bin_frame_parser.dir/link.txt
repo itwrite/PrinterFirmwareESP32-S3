@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names -fsanitize=thread CMakeFiles/test_bin_frame_parser.dir/test_bin_frame_parser.cpp.o -o test_bin_frame_parser  libijpd_core.a

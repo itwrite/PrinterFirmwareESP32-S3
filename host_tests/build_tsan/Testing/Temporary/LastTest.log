@@ -1,0 +1,67 @@
+Start testing: Oct 20 03:35 CST
+----------------------------------------------------------
+10/18 Testing: test_slot_pool
+10/18 Test: test_slot_pool
+Command: "/Users/zzpzero/CLionProjects/ESP32-S3/host_tests/build_tsan/test_slot_pool"
+Directory: /Users/zzpzero/CLionProjects/ESP32-S3/host_tests/build_tsan
+"test_slot_pool" start time: Oct 20 03:35 CST
+Output:
+----------------------------------------------------------
+test_slot_pool: 30279 passed, 0 failed
+<end of output>
+Test time =   1.09 sec
+----------------------------------------------------------
+Test Passed.
+"test_slot_pool" end time: Oct 20 03:35 CST
+"test_slot_pool" time elapsed: 00:00:01
+----------------------------------------------------------
+
+12/18 Testing: test_job_state_machine
+12/18 Test: test_job_state_machine
+Command: "/Users/zzpzero/CLionProjects/ESP32-S3/host_tests/build_tsan/test_job_state_machine"
+Directory: /Users/zzpzero/CLionProjects/ESP32-S3/host_tests/build_tsan
+"test_job_state_machine" start time: Oct 20 03:35 CST
+Output:
+----------------------------------------------------------
+test_job_state_machine: 51447 passed, 0 failed
+<end of output>
+Test time =   1.18 sec
+----------------------------------------------------------
+Test Passed.
+"test_job_state_machine" end time: Oct 20 03:35 CST
+"test_job_state_machine" time elapsed: 00:00:01
+----------------------------------------------------------
+
+13/18 Testing: test_stats
+13/18 Test: test_stats
+Command: "/Users/zzpzero/CLionProjects/ESP32-S3/host_tests/build_tsan/test_stats"
+Directory: /Users/zzpzero/CLionProjects/ESP32-S3/host_tests/build_tsan
+"test_stats" start time: Oct 20 03:35 CST
+Output:
+----------------------------------------------------------
+test_stats: 20 passed, 0 failed
+<end of output>
+Test time =   0.81 sec
+----------------------------------------------------------
+Test Passed.
+"test_stats" end time: Oct 20 03:35 CST
+"test_stats" time elapsed: 00:00:00
+----------------------------------------------------------
+
+14/18 Testing: test_print_pipeline
+14/18 Test: test_print_pipeline
+Command: "/Users/zzpzero/CLionProjects/ESP32-S3/host_tests/build_tsan/test_print_pipeline"
+Directory: /Users/zzpzero/CLionProjects/ESP32-S3/host_tests/build_tsan
+"test_print_pipeline" start time: Oct 20 03:35 CST
+Output:
+----------------------------------------------------------
+test_print_pipeline: 387 passed, 0 failed
+<end of output>
+Test time =   1.20 sec
+----------------------------------------------------------
+Test Passed.
+"test_print_pipeline" end time: Oct 20 03:35 CST
+"test_print_pipeline" time elapsed: 00:00:01
+----------------------------------------------------------
+
+End testing: Oct 20 03:35 CST

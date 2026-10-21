@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/zzpzero/CLionProjects/ESP32-S3/host_tests/build_tsan/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

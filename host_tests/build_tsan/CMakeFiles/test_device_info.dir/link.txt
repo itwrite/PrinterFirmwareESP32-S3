@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names -fsanitize=thread CMakeFiles/test_device_info.dir/test_device_info.cpp.o -o test_device_info  libijpd_app.a libijpd_core.a

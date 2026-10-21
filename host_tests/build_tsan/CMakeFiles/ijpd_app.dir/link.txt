@@ -1,0 +1,2 @@
+/usr/bin/ar qc libijpd_app.a "CMakeFiles/ijpd_app.dir/Users/zzpzero/CLionProjects/ESP32-S3/components/app/src/control_plane.cpp.o" "CMakeFiles/ijpd_app.dir/Users/zzpzero/CLionProjects/ESP32-S3/components/app/src/device_info.cpp.o"
+/usr/bin/ranlib libijpd_app.a

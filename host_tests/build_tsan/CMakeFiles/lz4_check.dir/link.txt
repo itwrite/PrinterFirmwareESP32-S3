@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names -fsanitize=thread CMakeFiles/lz4_check.dir/lz4_check.cpp.o -o lz4_check  libijpd_core.a

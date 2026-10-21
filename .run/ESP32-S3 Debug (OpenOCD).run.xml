@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="ESP32-S3 Debug (OpenOCD)" type="com.jetbrains.cidr.embedded.openocd.conf.type" factoryName="com.jetbrains.cidr.embedded.openocd.conf.factory" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="ijpd_printer" TARGET_NAME="ijpd_printer.elf" CONFIG_NAME="" RUN_TARGET="ijpd_printer.elf">
+    <openocd GDB_PORT="3333" EXEC_PATH="$USER_HOME$/.espressif/tools/openocd-esp32/v0.12.0-esp32-20241016/openocd-esp32/bin/openocd" SCRIPT="board/esp32s3-builtin.cfg" DOWNLOAD="ALWAYS" SEARCH_TIMEOUT="1000" />
+    <method v="2">
+      <option name="CLION.EXTERNAL.BUILD" enabled="true" />
+    </method>
+  </configuration>
+</component>

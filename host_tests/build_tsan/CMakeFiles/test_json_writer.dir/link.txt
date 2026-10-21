@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names -fsanitize=thread CMakeFiles/test_json_writer.dir/test_json_writer.cpp.o -o test_json_writer  libijpd_core.a

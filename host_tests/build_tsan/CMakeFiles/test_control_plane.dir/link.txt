@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names -fsanitize=thread CMakeFiles/test_control_plane.dir/test_control_plane.cpp.o -o test_control_plane  libijpd_app.a libijpd_core.a
