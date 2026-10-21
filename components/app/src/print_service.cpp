@@ -154,6 +154,7 @@ bool PrintService::serialize_event_(const PrintPipeline::Event& ev, char* buf,
             }
         } else {
             if (!w.kv_i64("bytes_decoded", s.bytes_decoded)) return false;
+            if (!w.kv_i64("bytes_printed", s.bytes_printed)) return false;
             if (!w.kv_i64("queue_watermark", s.queue_watermark)) return false;
             if (!w.kv_i64("queue_watermark_max", s.queue_watermark_max)) return false;
             if (!w.kv_i64("throughput_bps", s.throughput_bps)) return false;
