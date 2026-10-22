@@ -319,7 +319,7 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     os.print_row = os_print_row;
     os.on_event = os_on_event;
 
-    PrintheadConfig ph{p.bytes_per_row, 200, 0};  // Mock：200 行/秒
+    PrintheadConfig ph{p.bytes_per_row, 1000, 0};  // Mock: 1000 行/秒(加快演示)
     (void)self->printhead_.begin(ph);
 
     if (!self->buffered_) {
@@ -627,7 +627,13 @@ void PrintService::check_timeouts_(uint64_t now) noexcept {
         const uint64_t started = buf_started_ms_;
         if (buf_receiving_ &&
             now - last_rx_ms_ >= cfg::PACKET_IDLE_TIMEOUT_MS) {
-            IJPD_LOGW(kTag, "buffered rx idle timeout");
+            IJPD_LOGW(kTag, "buffered rx idle timeout: now=%llu last_rx=%u "
+                      "diff=%llu idle_ms=%u started=%llu",
+                      static_cast<unsigned long long>(now),
+                      static_cast<unsigned>(last_rx_ms_),
+                      static_cast<unsigned long long>(now - last_rx_ms_),
+                      static_cast<unsigned>(cfg::PACKET_IDLE_TIMEOUT_MS),
+                      static_cast<unsigned long long>(started));
             finish_buffered_(PrintPipeline::Event::Kind::Failed, Err::JOB_TIMEOUT);
             token_used_ = true;
             return;

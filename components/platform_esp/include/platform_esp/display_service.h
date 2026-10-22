@@ -39,9 +39,7 @@ public:
 private:
     DisplayService() noexcept = default;
     static void flush_task_(void* arg) noexcept;
-    void render_frame_() noexcept;          // 兼容占位(已废弃)
-    uint32_t render_progressive_() noexcept;  // 打印中:增量灰度(仅新行)
-    void render_full_() noexcept;             // 任务后:完整四色合成一次
+    void render_frame_() noexcept;
 
     struct Impl;
     Impl* impl_ = nullptr;

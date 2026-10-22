@@ -118,9 +118,9 @@ Err WifiManager::start() noexcept {
     portal_ = new ProvisioningPortal();
     const Err pe = portal_->start();
     if (pe != Err::OK) {
-        IJPD_LOGE(kTag, "portal start failed: %d", (int)pe);
+        IJPD_LOGW(kTag, "portal start failed: %d - 打印 TCP 不受影响", (int)pe);
         portal_active_ = false;
-        return pe;  // 无 Wi-Fi 也不致命，BLE 可用
+        // 不 return:portal 失败不应阻止后续 TCP 服务器启动
     }
 
     IJPD_LOGI(kTag, "provisioning portal active (connect to IJPD-Setup-XXXX)");
