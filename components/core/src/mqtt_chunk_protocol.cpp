@@ -7,6 +7,40 @@
 
 namespace ijpd {
 
+Err MqttChunkSequence::begin(const char* job_id, size_t job_id_len) noexcept {
+    if (job_id == nullptr || job_id_len == 0 || job_id_len > cfg::JOB_ID_MAX) {
+        return Err::INVALID_ARGUMENT;
+    }
+    std::memcpy(job_id_, job_id, job_id_len);
+    job_id_[job_id_len] = '\0';
+    job_id_len_ = static_cast<uint8_t>(job_id_len);
+    total_chunks_ = 0;
+    next_index_ = 0;
+    active_ = true;
+    return Err::OK;
+}
+
+void MqttChunkSequence::reset() noexcept {
+    active_ = false;
+    total_chunks_ = 0;
+    next_index_ = 0;
+    job_id_len_ = 0;
+    job_id_[0] = '\0';
+}
+
+Err MqttChunkSequence::accept(const MqttChunkView& chunk) noexcept {
+    if (!active_ || chunk.job_id == nullptr || chunk.job_id_len != job_id_len_ ||
+        std::memcmp(chunk.job_id, job_id_, job_id_len_) != 0) {
+        return Err::INVALID_ARGUMENT;
+    }
+    if (total_chunks_ == 0) total_chunks_ = chunk.total_chunks;
+    if (chunk.total_chunks != total_chunks_ || chunk.chunk_index != next_index_) {
+        return Err::PACKET_OUT_OF_ORDER;
+    }
+    ++next_index_;
+    return Err::OK;
+}
+
 Err parse_mqtt_chunk(const uint8_t* data, size_t len, MqttChunkView* out) noexcept {
     if (data == nullptr || out == nullptr || len < MQTT_CHUNK_HEADER_SIZE) {
         return Err::INVALID_ARGUMENT;

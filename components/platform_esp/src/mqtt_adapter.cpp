@@ -74,7 +74,10 @@ Err MqttAdapter::start(const char* uri, const char* base_topic, const char* devi
     client_ = esp_mqtt_client_init(&cfg);
     if (client_ == nullptr) {
         vQueueDelete(static_cast<QueueHandle_t>(command_queue_));
+        vQueueDelete(static_cast<QueueHandle_t>(chunk_queue_));
+        for (void*& buffer : chunk_buffers_) { heap_caps_free(buffer); buffer = nullptr; }
         command_queue_ = nullptr;
+        chunk_queue_ = nullptr;
         return Err::OUT_OF_MEMORY;
     }
     host_ = host;
@@ -126,6 +129,7 @@ void MqttAdapter::stop() noexcept {
         buffer = nullptr;
     }
     connected_pending_.store(false, std::memory_order_relaxed);
+    disconnected_pending_.store(false, std::memory_order_relaxed);
     command_len_ = 0;
     chunk_free_mask_.store(0, std::memory_order_relaxed);
     chunk_slot_ = -1;
@@ -140,6 +144,10 @@ void MqttAdapter::poll() noexcept {
     if (connected_pending_.exchange(false, std::memory_order_acq_rel) &&
         host_.on_connected != nullptr) {
         host_.on_connected(host_.user);
+    }
+    if (disconnected_pending_.exchange(false, std::memory_order_acq_rel) &&
+        host_.on_disconnected != nullptr) {
+        host_.on_disconnected(host_.user);
     }
     CommandMessage message{};
     while (xQueueReceive(static_cast<QueueHandle_t>(command_queue_), &message, 0) == pdTRUE) {
@@ -203,6 +211,8 @@ void MqttAdapter::on_event_(int32_t event_id, void* event_data) noexcept {
             }
         }
         connected_pending_.store(true, std::memory_order_release);
+    } else if (event_id == MQTT_EVENT_DISCONNECTED) {
+        disconnected_pending_.store(true, std::memory_order_release);
     } else if (event_id == MQTT_EVENT_DATA && event->data != nullptr &&
                event->data_len > 0) {
         if (event->current_data_offset == 0) {
@@ -230,6 +240,14 @@ void MqttAdapter::on_event_(int32_t event_id, void* event_data) noexcept {
         if (message_is_chunk_) {
             if (message_discard_ || chunk_slot_ < 0 ||
                 chunk_len_ + static_cast<size_t>(event->data_len) > cfg::MAX_MQTT_CHUNK_BYTES) {
+                if (event->current_data_offset + event->data_len >= event->total_data_len &&
+                    chunk_slot_ >= 0) {
+                    chunk_free_mask_.fetch_or(static_cast<uint8_t>(1u << chunk_slot_),
+                                              std::memory_order_release);
+                    chunk_slot_ = -1;
+                    chunk_len_ = 0;
+                    message_is_chunk_ = false;
+                }
                 message_discard_ = true;
                 return;
             }

@@ -279,6 +279,7 @@ Err PrinterApp::start() noexcept {
         mqtt_host.user = this;
         mqtt_host.on_command = mqtt_feed;
         mqtt_host.on_chunk = PrintService::mqtt_chunk;
+        mqtt_host.on_disconnected = PrintService::mqtt_disconnected;
         e = mqtt_.start(config_.mqtt_uri, config_.mqtt_base_topic, device_id_, mqtt_host);
         if (e != Err::OK) {
             IJPD_LOGE(kTag, "mqtt start failed: %s", err_name(e));

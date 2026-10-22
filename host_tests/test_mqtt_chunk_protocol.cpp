@@ -53,5 +53,11 @@ int main() {
     bad_magic[0] = 'X';
     CHECK_TRUE(parse_mqtt_chunk(bad_magic.data(), bad_magic.size(), &view) ==
                Err::INVALID_ARGUMENT);
+
+    MqttChunkSequence sequence;
+    CHECK_TRUE(sequence.begin("job-1", 5) == Err::OK);
+    CHECK_TRUE(sequence.accept(view) == Err::OK);
+    CHECK_EQ(sequence.next_index(), 1u);
+    CHECK_TRUE(sequence.accept(view) == Err::PACKET_OUT_OF_ORDER);
     return ::ijpd::test::summary("test_mqtt_chunk_protocol");
 }

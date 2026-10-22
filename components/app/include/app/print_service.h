@@ -46,6 +46,7 @@ public:
     static bool data_accept(void* user, int fd, const char* peer) noexcept;
     static bool raw_accept(void* user, int fd, const char* peer) noexcept;
     static void mqtt_chunk(void* user, const uint8_t* data, size_t len) noexcept;
+    static void mqtt_disconnected(void* user) noexcept;
 
     void set_mqtt_context(const char* base_topic, const char* device_id) noexcept;
 
@@ -119,6 +120,7 @@ private:
     bool mqtt_transport_ = false;
     uint32_t mqtt_next_chunk_ = 0;
     uint32_t mqtt_total_chunks_ = 0;
+    MqttChunkSequence mqtt_sequence_{};
     char mqtt_base_topic_[128] = {};
     char mqtt_device_id_[32] = {};
     // 图片指纹（端到端校验）：print 任务写，report 任务读

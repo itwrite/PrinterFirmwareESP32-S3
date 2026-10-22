@@ -35,6 +35,24 @@ struct MqttChunkView {
     uint32_t payload_len = 0;
 };
 
+class MqttChunkSequence {
+public:
+    Err begin(const char* job_id, size_t job_id_len) noexcept;
+    Err accept(const MqttChunkView& chunk) noexcept;
+    void reset() noexcept;
+    bool active() const noexcept { return active_; }
+    bool complete() const noexcept { return active_ && next_index_ == total_chunks_; }
+    uint32_t next_index() const noexcept { return next_index_; }
+    uint32_t total_chunks() const noexcept { return total_chunks_; }
+
+private:
+    char job_id_[cfg::JOB_ID_MAX + 1] = {};
+    uint8_t job_id_len_ = 0;
+    uint32_t total_chunks_ = 0;
+    uint32_t next_index_ = 0;
+    bool active_ = false;
+};
+
 inline constexpr size_t MQTT_CHUNK_HEADER_SIZE = 24;
 inline constexpr uint8_t MQTT_CHUNK_VERSION = 1;
 

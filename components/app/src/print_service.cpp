@@ -269,6 +269,7 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     self->mqtt_transport_ = p.transport == StartPrintTransport::Mqtt;
     self->mqtt_next_chunk_ = 0;
     self->mqtt_total_chunks_ = 0;
+    self->mqtt_sequence_.reset();
     self->cutter_after_finish_ = p.cutter_after_finish;
     cfg.total_packets = p.total_packets;
     cfg.total_bytes_uncompressed = p.total_bytes_uncompressed;
@@ -371,6 +372,8 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
         return Err::INTERNAL_ERROR;
     }
     if (self->mqtt_transport_) {
+        const Err seq = self->mqtt_sequence_.begin(self->job_id_, std::strlen(self->job_id_));
+        if (seq != Err::OK) return seq;
         char topic[192] = {};
         const int n = snprintf(topic, sizeof(topic), "%s/%s/job/%s/chunk",
                                self->mqtt_base_topic_, self->mqtt_device_id_, self->job_id_);
@@ -440,6 +443,11 @@ void PrintService::mqtt_chunk(void* user, const uint8_t* data, size_t len) noexc
     self->accept_mqtt_chunk_(data, len);
 }
 
+void PrintService::mqtt_disconnected(void* user) noexcept {
+    auto* self = static_cast<PrintService*>(user);
+    if (self->mqtt_transport_) self->fail_mqtt_job_(Err::DATA_CONNECTION_LOST);
+}
+
 void PrintService::fail_mqtt_job_(Err code) noexcept {
     if (buffered_) {
         finish_buffered_(PrintPipeline::Event::Kind::Failed, code);
@@ -459,9 +467,9 @@ void PrintService::accept_mqtt_chunk_(const uint8_t* data, size_t len) noexcept 
         return;
     }
     last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
-    if (mqtt_total_chunks_ == 0) mqtt_total_chunks_ = view.total_chunks;
-    if (view.total_chunks != mqtt_total_chunks_ || view.chunk_index != mqtt_next_chunk_) {
-        fail_mqtt_job_(Err::PACKET_OUT_OF_ORDER);
+    const Err sequence_error = mqtt_sequence_.accept(view);
+    if (sequence_error != Err::OK) {
+        fail_mqtt_job_(sequence_error);
         return;
     }
 
@@ -487,7 +495,8 @@ void PrintService::accept_mqtt_chunk_(const uint8_t* data, size_t len) noexcept 
         if (result == PrintPipeline::Pump::Failed) return;
         if (result == PrintPipeline::Pump::WouldBlock) return;
     }
-    ++mqtt_next_chunk_;
+    mqtt_next_chunk_ = mqtt_sequence_.next_index();
+    mqtt_total_chunks_ = mqtt_sequence_.total_chunks();
 }
 
 void PrintService::close_raw_socket_() noexcept {
