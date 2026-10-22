@@ -280,6 +280,14 @@ void DisplayService::render_frame_() noexcept {
                     uint32_t s=0; for(uint32_t p=0;p<npl;++p)s+=cv[p];
                     uint32_t ink=s/npl; r=255-ink;g=255-ink;b=255-ink;
                 }
+                // 饱和度+对比度增强(预览观感)
+                uint32_t avg = (r + g + b) / 3;
+                r = avg + (r - avg) * 13 / 10;  // 1.3x 饱和度
+                g = avg + (g - avg) * 13 / 10;
+                b = avg + (b - avg) * 13 / 10;
+                r = 128 + (r - 128) * 11 / 10;  // 1.1x 对比度
+                g = 128 + (g - 128) * 11 / 10;
+                b = 128 + (b - 128) * 11 / 10;
                 color = rgb565(srgb_lut[r>255?255:r],srgb_lut[g>255?255:g],srgb_lut[b>255?255:b]);
             }
             line[sx] = color;
