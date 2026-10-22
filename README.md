@@ -52,6 +52,13 @@
 | 任务栈高水位 | 使用初值 | `uxTaskGetStackHighWaterMark` 实测后固定 |
 | Wi-Fi 配网方式 | 开放决策 D-11 | 用户选定（当前 menuconfig） |
 
+### 通用固件配置
+
+通过 `core/printer_config.h` 的 `PrinterConfig` 选择打印机变体。Profile、设备型号
+和服务开关均可按硬件配置；未声明的服务默认关闭。当前已实现 IJPD TCP、BLE IJPD
+控制和可选 ESC/POS RAW TCP（默认 9102）。MQTT/AirPrint 配置字段已预留，但适配器
+完成前不会报告为可用。
+
 ---
 
 ## 目录结构

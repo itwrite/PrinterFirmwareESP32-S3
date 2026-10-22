@@ -31,6 +31,7 @@
 #include "core/json_lite.h"
 #include "core/print_profile.h"
 #include "core/protocol_types.h"
+#include "core/raster_channels.h"
 
 namespace ijpd {
 
@@ -52,6 +53,9 @@ struct StartPrintParams {
     // 显示还原提示(可选):像素位深与通道平面数(缺省 1/1)
     uint32_t pixel_bits = 1;
     uint32_t image_planes = 1;
+    // Optional raster plane order. Empty preserves the legacy positional order.
+    uint8_t channel_order_count = 0;
+    RasterChannel channel_order[8] = {};
     bool cutter_after_finish = false;
     // 派生量（协议 §4.3）：
     //   nominal = ceil(total_bytes / total_packets)

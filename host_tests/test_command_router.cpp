@@ -134,7 +134,9 @@ const char* kStartPrintValid =
     R"({"msg_id":"job-create-001","cmd":"start_print","data":{)"
     R"("job_id":"job-001","total_bytes_uncompressed":120000,"total_packets":30,)"
     R"("compression":"lz4_block","integrity":"crc32","bytes_per_row":1200,)"
-    R"("total_rows":100,"cutter_after_finish":false}})";
+    R"("total_rows":100,"pixel_bits":1,"image_planes":4,)"
+    R"("channel_order":["cyan","magenta","yellow","black"],)"
+    R"("cutter_after_finish":false}})";
 
 }  // namespace
 
@@ -177,6 +179,11 @@ int main() {
         CHECK_TRUE(TestHooks::last_start.integrity == Integrity::Crc32);
         CHECK_EQ(TestHooks::last_start.bytes_per_row, 1200);
         CHECK_EQ(TestHooks::last_start.total_rows, 100);
+        CHECK_EQ(TestHooks::last_start.channel_order_count, 4);
+        CHECK_TRUE(TestHooks::last_start.channel_order[0] == RasterChannel::Cyan);
+        CHECK_TRUE(TestHooks::last_start.channel_order[1] == RasterChannel::Magenta);
+        CHECK_TRUE(TestHooks::last_start.channel_order[2] == RasterChannel::Yellow);
+        CHECK_TRUE(TestHooks::last_start.channel_order[3] == RasterChannel::Black);
         CHECK_EQ(TestHooks::last_start.nominal_packet_bytes, 4000);
         CHECK_EQ(TestHooks::last_start.last_packet_bytes, 4000);
         CHECK_TRUE(out.resp.find("\"nominal\":4000") != std::string::npos);
@@ -281,6 +288,8 @@ int main() {
              "'compression' is not one of the allowed values"},
             {mut(base, R"("integrity":"crc32")", R"("integrity":"md5")"),
              "'integrity' is not one of the allowed values"},
+            {mut(base, R"("total_rows":100)", R"("total_rows":100,"channel_order":"cyan")"),
+             "'channel_order' must be an array"},
             {mut(base, R"("job_id":"j")", R"("job_id":"job-\u00231")"),
              "may only contain"},
             {mut(base, R"("job_id":"j")",
@@ -307,6 +316,20 @@ int main() {
             CHECK_TRUE(out.resp.find("\"success\":false") != std::string::npos);
             CHECK_TRUE(out.resp.find("\"code\":\"INVALID_ARGUMENT\"") != std::string::npos);
         }
+    }
+
+    // ================= 8. channel_order semantic validation =================
+    {
+        CommandRouter r;
+        TestHooks::reset();
+        TestHooks::install(r);
+        const Out out = run(
+            r, R"({"msg_id":"m","cmd":"start_print","data":{"job_id":"j",)"
+               R"("total_bytes_uncompressed":8,"total_packets":1,"compression":"none",)"
+               R"("bytes_per_row":1,"total_rows":8,"image_planes":2,)"
+               R"("channel_order":["cyan","cyan"]}})");
+        CHECK_TRUE(out.code == Err::INVALID_ARGUMENT);
+        CHECK_TRUE(std::strstr(r.last_error_message(), "duplicates") != nullptr);
     }
 
     // ================= 7. 信封校验失败 / 未知命令 =================

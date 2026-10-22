@@ -6,9 +6,10 @@ idf_component_register(
          "src/data_tcp_server.cpp"
          "src/display_service.cpp"
          "src/mdns_broadcast.cpp"
-         "src/provisioning_portal.cpp"
-         "src/psram_allocator.cpp"
-         "src/task_layout.cpp"
+          "src/provisioning_portal.cpp"
+          "src/psram_allocator.cpp"
+          "src/raw_tcp_server.cpp"
+          "src/task_layout.cpp"
          "src/wifi_manager.cpp"
     INCLUDE_DIRS "include"
     REQUIRES core bt esp_wifi esp_event esp_netif nvs_flash lwip esp_timer esp_hw_support esp_psram mdns esp_lcd esp_lcd_ili9341 driver

@@ -16,9 +16,11 @@
 #include "app/device_info.h"
 #include "app/print_service.h"
 #include "core/command_router.h"
+#include "core/printer_config.h"
 #include "platform_esp/ble_control_server.h"
 #include "platform_esp/control_tcp_server.h"
 #include "platform_esp/data_tcp_server.h"
+#include "platform_esp/raw_tcp_server.h"
 #include "platform_esp/psram_allocator.h"
 #include "platform_esp/wifi_manager.h"
 
@@ -30,12 +32,14 @@ public:
 
     Err start() noexcept;
 
-    // 中间件：注入打印机 Profile（start() 前调用）
-    void set_profile(const PrintProfile* profile) noexcept { profile_ = profile; }
+    // 兼容旧调用：只注入 Profile，其余服务保持默认关闭。
+    void set_profile(const PrintProfile* profile) noexcept { config_.profile = profile; }
+    // 注入完整打印机配置；未声明的服务默认不启动。
+    void set_config(const PrinterConfig* config) noexcept;
 
 private:
     PrinterApp() noexcept = default;
-    const PrintProfile* profile_ = nullptr;  // 中间件 Profile
+    PrinterConfig config_{};
 
     // Router 钩子（结果写入）
     static Err hook_device_info(void* user, JsonWriter& w) noexcept;
@@ -48,6 +52,8 @@ private:
     // ControlTcpServer Host 适配
     static void tcp_feed(void* user, int ch, const uint8_t* data, size_t len) noexcept;
     static void tcp_tick(void* user) noexcept;
+    static void service_tick_task_(void* user) noexcept;
+    void tick_services_() noexcept;
     static void tcp_channel_closed(void* user, int ch) noexcept;
     static void tcp_register_sink(void* user, int ch, void* sink_user,
                                   ControlTcpServer::SendFn send) noexcept;
@@ -58,6 +64,7 @@ private:
 
     // DataTcpServer 策略：Phase 5 无任务等待，一律拒绝
     static bool data_accept(void* user, int fd, const char* peer) noexcept;
+    static bool raw_accept(void* user, int fd, const char* peer) noexcept;
 
     CommandRouter router_;
     ControlPlane plane_;
@@ -65,12 +72,13 @@ private:
     WifiManager wifi_;
     ControlTcpServer ctl_tcp_;
     DataTcpServer data_tcp_;
+    RawTcpServer raw_tcp_;
     BleControlServer ble_;
 
     DeviceInfo di_{};
     char device_id_[16] = {0};
-    char fw_version_[24] = "0.1.0-phase5";
     bool mdns_started_ = false;  // Wi-Fi 就绪后惰性启动(tcp_tick 重试)
+    volatile bool service_tick_running_ = false;
 };
 
 }  // namespace ijpd

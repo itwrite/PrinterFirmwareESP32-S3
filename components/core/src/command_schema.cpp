@@ -49,6 +49,18 @@ constexpr ParamSpec p_enum(const char* key, const char* label, const char* desc,
     return s;
 }
 
+constexpr ParamSpec p_string_array(const char* key, const char* label, const char* desc,
+                                   bool required, int64_t min_count,
+                                   int64_t max_count) noexcept {
+    ParamSpec s{};
+    s.key = key; s.label = label; s.description = desc;
+    s.type = ParamType::StringArray; s.required = required;
+    s.has_min = true; s.has_max = true;
+    s.min_value = min_count; s.max_value = max_count;
+    s.str_min_len = 1; s.str_max_len = 32;
+    return s;
+}
+
 // ---- 枚举候选 ----
 constexpr const char* const kCompressionOpts[] = {"none", "lz4_block"};
 constexpr const char* const kIntegrityOpts[] = {"none", "crc32"};
@@ -78,7 +90,9 @@ constexpr ParamSpec kStartPrintParams[] = {
     p_int("pixel_bits", "像素位深", "还原显示用:1=1-bit,8=8-bit(缺省 1)",
           false, 0, 8, nullptr),
     p_int("image_planes", "通道平面数", "还原显示用:光栅平面数(缺省 1)",
-          false, 0, 8, nullptr),
+           false, 0, 8, nullptr),
+    p_string_array("channel_order", "通道顺序", "还原显示用:每个光栅平面的通道名",
+                   false, 1, 8),
     p_bool("cutter_after_finish", "完成后切纸", "设备不支持切纸时任务以警告完成",
            false, false),
 };
@@ -140,6 +154,7 @@ const char* param_type_name(ParamType t) noexcept {
         case ParamType::String:  return "string";
         case ParamType::Boolean: return "boolean";
         case ParamType::Enum:    return "enum";
+        case ParamType::StringArray: return "string_array";
         default:                 return "unknown";
     }
 }

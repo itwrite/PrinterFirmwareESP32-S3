@@ -21,6 +21,10 @@ PrinterApp& PrinterApp::instance() noexcept {
     return app;
 }
 
+void PrinterApp::set_config(const PrinterConfig* config) noexcept {
+    if (config != nullptr) config_ = *config;
+}
+
 // ---------------------------------------------------------------- Router 钩子
 
 Err PrinterApp::hook_device_info(void* user, JsonWriter& w) noexcept {
@@ -62,23 +66,36 @@ void PrinterApp::tcp_feed(void* user, int ch, const uint8_t* data, size_t len) n
 
 void PrinterApp::tcp_tick(void* user) noexcept {
     auto* self = static_cast<PrinterApp*>(user);
-    self->ble_.poll();  // BLE 队列 -> 控制面（同一线程）
-    self->plane_.tick(task_layout::now_ms());
+    self->tick_services_();
+}
+
+void PrinterApp::service_tick_task_(void* user) noexcept {
+    auto* self = static_cast<PrinterApp*>(user);
+    while (self->service_tick_running_) {
+        self->tick_services_();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    vTaskDelete(nullptr);
+}
+
+void PrinterApp::tick_services_() noexcept {
+    if (config_.services.ble) ble_.poll();  // BLE 队列 -> 控制面
+    plane_.tick(task_layout::now_ms());
     PrintService::instance().tick();  // 任务超时看护
-    self->wifi_.stop_portal_if_connected();  // Wi-Fi 连上后关配网门户
+    wifi_.stop_portal_if_connected();  // Wi-Fi 连上后关配网门户
     // mDNS 惰性启动:网络栈(netif)就绪后 mdns_init 才能成功,
     // 每 tick 重试直至成功(成功一次后不再进此分支)。
-    if (!self->mdns_started_ && self->wifi_.connected()) {
+    if (!mdns_started_ && config_.services.ijpd_tcp && wifi_.connected()) {
         // device_id_ 形如 "IJPD-71D5D0":取 MAC 三字节十六进制转小写做主机名
         char lower[9] = {0};
-        for (int i = 0; i < 6 && self->device_id_[5 + i]; ++i) {
-            lower[i] = static_cast<char>(tolower(self->device_id_[5 + i]));
+        for (int i = 0; i < 6 && device_id_[5 + i]; ++i) {
+            lower[i] = static_cast<char>(tolower(device_id_[5 + i]));
         }
         char hostname[24];
         snprintf(hostname, sizeof(hostname), "ijpd-%s", lower);
-        if (mdns_broadcast_start(hostname, self->device_id_, self->fw_version_) ==
+        if (mdns_broadcast_start(hostname, device_id_, config_.fw_version) ==
             Err::OK) {
-            self->mdns_started_ = true;
+            mdns_started_ = true;
         }
     }
 }
@@ -110,6 +127,10 @@ bool PrinterApp::data_accept(void* user, int fd, const char* peer) noexcept {
     return PrintService::data_accept(&PrintService::instance(), fd, peer);
 }
 
+bool PrinterApp::raw_accept(void* user, int fd, const char* peer) noexcept {
+    return PrintService::raw_accept(&PrintService::instance(), fd, peer);
+}
+
 // ---------------------------------------------------------------- 启动
 
 Err PrinterApp::start() noexcept {
@@ -126,17 +147,34 @@ Err PrinterApp::start() noexcept {
              mac[5]);
     // mDNS 广播推迟到 Wi-Fi 就绪后(tcp_tick 惰性启动,见 tcp_tick)
 
+    if (config_.services.escpos_raw_tcp &&
+        (config_.profile == nullptr ||
+         !has_mode(config_.profile->data_modes, DataMode::EscPos))) {
+        IJPD_LOGW(kTag, "escpos raw disabled: profile does not support escpos");
+        config_.services.escpos_raw_tcp = false;
+    }
+    if (config_.services.mqtt || config_.services.airprint) {
+        IJPD_LOGW(kTag, "mqtt/airprint adapters are not enabled in this build");
+        config_.services.mqtt = false;
+        config_.services.airprint = false;
+    }
+
     di_ = DeviceInfo{};
     di_.device_id = device_id_;
-    di_.model = "IJPD-DEV";
-    di_.fw_version = fw_version_;
+    di_.model = config_.device_model;
+    di_.fw_version = config_.fw_version;
     di_.hal_mode = "mock";
-    di_.profile = profile_;  // 中间件 Profile
+    di_.profile = config_.profile;  // 中间件 Profile
     di_.psram_available = mem_.psram_available;
     di_.psram_sizes_valid = mem_.psram_available;
     di_.cap_paper_feed = true;   // Mock 走纸（真实电机 Phase 7）
-    di_.cap_cutter = (profile_ != nullptr) && profile_->has_cutter;
+    di_.cap_cutter = (config_.profile != nullptr) && config_.profile->has_cutter;
     di_.cap_mock_print = true;
+    di_.services = config_.services;
+    di_.escpos_raw_tcp_port = config_.services.escpos_raw_tcp
+                                  ? config_.escpos_raw_tcp_port
+                                  : 0;
+    di_.airprint_port = config_.services.airprint ? config_.airprint_port : 0;
 
     // 3) 打印编排服务（Mock HAL）
     const Err de = DisplayService::instance().start();
@@ -152,9 +190,9 @@ Err PrinterApp::start() noexcept {
 
     // 4) 路由能力（打印=PSRAM 可用；走纸=Mock；切纸=Profile）
     const bool print_ok = (se == Err::OK) && mem_.psram_available;
-    const bool cutter_ok = (profile_ != nullptr) && profile_->has_cutter;
+    const bool cutter_ok = (config_.profile != nullptr) && config_.profile->has_cutter;
     router_.set_capabilities(Capabilities{print_ok, se == Err::OK, cutter_ok});
-    router_.set_profile(profile_);
+    router_.set_profile(config_.profile);
     CommandRouter::Hooks hooks;
     hooks.user = this;
     hooks.get_device_info = hook_device_info;
@@ -173,7 +211,10 @@ Err PrinterApp::start() noexcept {
     plane_.set_sink(ControlPlane::kChannelBle, {this, ble_send});
 
     // 6) Wi-Fi / 网络栈（必须先于 TCP 服务器：esp_netif_init 在此触发）
-    Err e = wifi_.start();
+    const bool network_needed = config_.services.wifi || config_.services.ijpd_tcp ||
+                                config_.services.escpos_raw_tcp || config_.services.mqtt ||
+                                config_.services.airprint;
+    Err e = network_needed ? wifi_.start() : Err::OK;
     if (e != Err::OK) {
         IJPD_LOGW(kTag, "wifi start failed (%s) - BLE channel still available",
                   err_name(e));
@@ -186,17 +227,29 @@ Err PrinterApp::start() noexcept {
     tcp_host.tick = tcp_tick;
     tcp_host.on_channel_closed = tcp_channel_closed;
     tcp_host.register_sink = tcp_register_sink;
-    e = ctl_tcp_.start(cfg::CONTROL_TCP_PORT, tcp_host);
-    if (e != Err::OK) {
-        IJPD_LOGE(kTag, "control tcp start failed: %s", err_name(e));
-        return e;
+    if (config_.services.ijpd_tcp) {
+        e = ctl_tcp_.start(cfg::CONTROL_TCP_PORT, tcp_host);
+        if (e != Err::OK) {
+            IJPD_LOGE(kTag, "control tcp start failed: %s", err_name(e));
+            return e;
+        }
+    }
+
+    if (config_.services.escpos_raw_tcp) {
+        e = raw_tcp_.start(config_.escpos_raw_tcp_port, raw_accept, this);
+        if (e != Err::OK) {
+            IJPD_LOGE(kTag, "raw tcp start failed: %s", err_name(e));
+            return e;
+        }
     }
 
     // 8) 数据服务器（策略委托打印服务：仅任务等待握手时接受）
-    e = data_tcp_.start(cfg::DATA_TCP_PORT, data_accept, this);
-    if (e != Err::OK) {
-        IJPD_LOGE(kTag, "data tcp start failed: %s", err_name(e));
-        return e;
+    if (config_.services.ijpd_tcp) {
+        e = data_tcp_.start(cfg::DATA_TCP_PORT, data_accept, this);
+        if (e != Err::OK) {
+            IJPD_LOGE(kTag, "data tcp start failed: %s", err_name(e));
+            return e;
+        }
     }
 
     // 9) BLE
@@ -204,13 +257,27 @@ Err PrinterApp::start() noexcept {
     ble_host.user = this;
     ble_host.feed = ble_feed;
     ble_host.send = ble_send;
-    e = ble_.start("IJPD-Printer", ble_host);
-    if (e != Err::OK) {
-        IJPD_LOGE(kTag, "ble start failed: %s", err_name(e));
-        return e;
+    if (config_.services.ble) {
+        e = ble_.start(config_.ble_name, ble_host);
+        if (e != Err::OK) {
+            IJPD_LOGE(kTag, "ble start failed: %s", err_name(e));
+            return e;
+        }
     }
 
-    IJPD_LOGI(kTag, "started: device=%s fw=%s psram=%s", device_id_, fw_version_,
+    if (!config_.services.ijpd_tcp &&
+        (config_.services.ble || config_.services.wifi ||
+         config_.services.escpos_raw_tcp)) {
+        service_tick_running_ = true;
+        e = task_layout::spawn("app_tick", service_tick_task_, this, 0,
+                               task_layout::kPrioCtrl, 3072);
+        if (e != Err::OK) {
+            service_tick_running_ = false;
+            return e;
+        }
+    }
+
+    IJPD_LOGI(kTag, "started: device=%s fw=%s psram=%s", device_id_, config_.fw_version,
               mem_.psram_available ? "ok" : "unavailable");
     return Err::OK;
 }

@@ -8,7 +8,7 @@
 
 ## 一、快速理解
 
-你的 App 通过 **Wi-Fi TCP** 或 **BLE** 连接打印机，用 **JSON 命令** 控制它，用 **二进制分包** 传输打印数据。
+你的 App 通过 **Wi-Fi TCP** 或 **BLE** 连接打印机，用 **JSON 命令** 控制它，用 **二进制分包** 传输打印数据。固件变体通过 `get_device_info.result.capabilities.services` 报告实际启用的 `wifi`、`ble`、`ijpd_tcp`、`escpos_raw_tcp`、`mqtt`、`airprint` 服务；未启用或未实现的服务为 `false`。
 
 ```
 ┌──────────────┐         ┌─────────────────────────────────┐
@@ -40,6 +40,7 @@
 |---|---|
 | 控制端口 | **9100** (TCP) |
 | 数据端口 | **9101** (TCP) |
+| ESC/POS RAW 端口 | **9102**（仅 Profile 声明支持 ESC/POS 且 HAL 实现 `submitRaw()` 时启用） |
 | 并发控制连接 | 最多 2 个 TCP + 1 个 BLE |
 | 并发数据连接 | 仅 1 个（任务期间独占） |
 
@@ -194,6 +195,9 @@ JSON 正文中**禁止出现裸 `#` 字符**。如需包含（如密码、自定
 | `mode` | enum | 否 | `"raster"`（默认）或 `"escpos"` |
 | `bytes_per_row` | int | raster 时必填 | 1–65535；受 Profile 宽度约束 |
 | `total_rows` | int | raster 时必填 | ≥1 |
+| `pixel_bits` | int | 否 | 显示还原提示：1 或 8 |
+| `image_planes` | int | 否 | 显示还原提示：1 .. 8 |
+| `channel_order` | string array | 否 | 与平面顺序一致，例如 `["cyan","magenta","yellow","black"]` |
 | `cutter_after_finish` | bool | 否 | 默认 false |
 
 **响应**：
@@ -270,6 +274,13 @@ JSON 正文中**禁止出现裸 `#` 字符**。如需包含（如密码、自定
 ```
 
 `distance_um`：1–254000（微米）。仅在无活动任务时可用。
+
+### 4.7 ESC/POS RAW TCP
+
+ESC/POS RAW 是独立的标准字节流入口，不发送 IJPD JSON、Hello、CRC 或 LZ4。
+客户端连接 `capabilities.service_ports.escpos_raw_tcp` 返回的端口，直接发送标准
+ESC/POS 命令；TCP 连接关闭表示本次 RAW 作业结束。该能力只适用于热敏/标签等
+实现了 `IPrintheadHal::submitRaw()` 的 Profile。
 
 ### 4.6 cut_paper
 

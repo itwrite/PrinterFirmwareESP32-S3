@@ -321,6 +321,42 @@ Err CommandRouter::validate_data_against_schema(Handle data,
                 }
                 break;
             }
+            case ParamType::StringArray: {
+                if (parser_.type(h) != Type::Array) {
+                    set_msg_key(ps.key, "must be an array");
+                    return Err::INVALID_ARGUMENT;
+                }
+                size_t count = 0;
+                if (parser_.array_length(h, &count) != Err::OK) {
+                    return Err::INTERNAL_ERROR;
+                }
+                if (ps.has_min && static_cast<int64_t>(count) < ps.min_value) {
+                    set_msg_key(ps.key, "has too few items");
+                    return Err::INVALID_ARGUMENT;
+                }
+                if (ps.has_max && static_cast<int64_t>(count) > ps.max_value) {
+                    set_msg_key(ps.key, "has too many items");
+                    return Err::INVALID_ARGUMENT;
+                }
+                for (size_t i = 0; i < count; ++i) {
+                    Handle item = JsonParser::kNone;
+                    if (parser_.array_element(h, i, &item) != Err::OK) {
+                        return Err::INTERNAL_ERROR;
+                    }
+                    const char* value = nullptr;
+                    size_t value_len = 0;
+                    if (parser_.as_string(item, &value, &value_len) != Err::OK) {
+                        set_msg_key(ps.key, "items must be strings");
+                        return Err::INVALID_ARGUMENT;
+                    }
+                    if ((ps.str_min_len != 0 && value_len < ps.str_min_len) ||
+                        (ps.str_max_len != 0 && value_len > ps.str_max_len)) {
+                        set_msg_key(ps.key, "contains an item with an invalid length");
+                        return Err::INVALID_ARGUMENT;
+                    }
+                }
+                break;
+            }
             default:
                 return Err::INTERNAL_ERROR;
         }
@@ -375,6 +411,19 @@ Err CommandRouter::finalize_start_print(StartPrintParams* p,
             if (p->bytes_per_row < profile->bytes_per_row_min) {
                 *msg = "bytes_per_row is below the printer's minimum";
                 return Err::INVALID_ARGUMENT;
+            }
+        }
+        if (p->channel_order_count != 0 &&
+            p->channel_order_count != p->image_planes) {
+            *msg = "channel_order length must equal image_planes";
+            return Err::INVALID_ARGUMENT;
+        }
+        for (uint8_t i = 0; i < p->channel_order_count; ++i) {
+            for (uint8_t j = 0; j < i; ++j) {
+                if (p->channel_order[i] == p->channel_order[j]) {
+                    *msg = "channel_order must not contain duplicates";
+                    return Err::INVALID_ARGUMENT;
+                }
             }
         }
     }
@@ -506,13 +555,44 @@ Err CommandRouter::dispatch(const CommandSpec& spec, const Envelope& env,
             // 显示还原提示(可选,缺省 1/1)
             p.pixel_bits = 1;
             p.image_planes = 1;
+            bool image_planes_supplied = false;
             h = parser_.find(env.data, "pixel_bits");
             if (h != JsonParser::kNone && parser_.as_i64(h, &v) == Err::OK && v > 0) {
                 p.pixel_bits = static_cast<uint32_t>(v);
             }
             h = parser_.find(env.data, "image_planes");
-            if (h != JsonParser::kNone && parser_.as_i64(h, &v) == Err::OK && v > 0) {
-                p.image_planes = static_cast<uint32_t>(v);
+            if (h != JsonParser::kNone) {
+                if (parser_.as_i64(h, &v) == Err::OK && v > 0) {
+                    image_planes_supplied = true;
+                    p.image_planes = static_cast<uint32_t>(v);
+                }
+            }
+            h = parser_.find(env.data, "channel_order");
+            p.channel_order_count = 0;
+            if (h != JsonParser::kNone) {
+                size_t count = 0;
+                if (parser_.array_length(h, &count) != Err::OK || count > 8) {
+                    return internal_fail(env, resp, resp_cap, resp_len);
+                }
+                for (size_t i = 0; i < count; ++i) {
+                    Handle item = JsonParser::kNone;
+                    const char* value = nullptr;
+                    size_t value_len = 0;
+                    if (parser_.array_element(h, i, &item) != Err::OK ||
+                        parser_.as_string(item, &value, &value_len) != Err::OK) {
+                        return internal_fail(env, resp, resp_cap, resp_len);
+                    }
+                    const RasterChannel channel = raster_channel_from_name(value, value_len);
+                    if (channel == RasterChannel::Unknown) {
+                        set_msg_raw("channel_order contains an unsupported channel");
+                        return emit_error(resp, resp_cap, resp_len, env.msg_id, env.msg_id_len,
+                                          env.cmd, env.cmd_len, Err::INVALID_ARGUMENT, err_msg_);
+                    }
+                    p.channel_order[p.channel_order_count++] = channel;
+                }
+                if (!image_planes_supplied && p.channel_order_count != 0) {
+                    p.image_planes = p.channel_order_count;
+                }
             }
 
             h = parser_.find(env.data, "compression");

@@ -183,6 +183,10 @@
 | `limits` | `max_control_frame`=2048、`max_packet_compressed`=65535、`max_packet_uncompressed`=65535、`max_job_bytes`=67108864、`max_total_packets`=65535、`queue_depth`=6、`control_port`=9100、`data_port`=9101 |
 | `commands` | 命令元数据数组（含 `supported` 标志） |
 
+`capabilities.services` 报告变体级服务开关：`wifi`、`ble`、`ijpd_tcp`、
+`escpos_raw_tcp`、`mqtt`、`airprint`。`capabilities.service_ports` 报告已启用服务
+的端口，未启用服务为 `null`。
+
 ### 4.3 `start_print`
 
 请求参数：
@@ -196,6 +200,9 @@
 | `integrity` | enum | 否（默认 `none`） | `none` \| `crc32` |
 | `bytes_per_row` | integer | 是 | 1 .. 65535 |
 | `total_rows` | integer | 是 | 1 .. `total_bytes_uncompressed` |
+| `pixel_bits` | integer | 否（默认 1） | 显示还原提示：1 或 8 |
+| `image_planes` | integer | 否（默认 1） | 显示还原提示：1 .. 8 |
+| `channel_order` | string array | 否 | 与光栅平面一一对应；例如 `["cyan","magenta","yellow","black"]` |
 | `cutter_after_finish` | boolean | 否（默认 false） | 设备不支持切纸时按警告处理，不影响打印结果 |
 
 **派生量（设备计算并在响应回显，双方据此校验每包长度）：**
@@ -267,6 +274,14 @@ last_packet_bytes    = total_bytes_uncompressed − nominal_packet_bytes × (tot
 
 - `feed_paper`：`{ "distance_um": 1..254000 }`；打印进行中 → `JOB_ALREADY_RUNNING`；走纸 HAL 未配置真实硬件 → Mock 模拟执行并返回 `{ "moved_um": N }`。
 - `cut_paper`：无参数；V1 默认 `UNSUPPORTED`，元数据 `supported:false`；绝不允许在未确认硬件时驱动任何 GPIO。
+
+### 4.7 ESC/POS RAW TCP
+
+当 `capabilities.services.escpos_raw_tcp=true` 时，设备在
+`capabilities.service_ports.escpos_raw_tcp`（默认 9102）接受标准 ESC/POS 原始
+字节流。该端口不使用 IJPD JSON、Hello、CRC 或 LZ4；TCP 连接关闭表示 RAW 作业
+结束。Profile 必须支持 `DataMode::EscPos`，且真实 HAL 必须实现
+`IPrintheadHal::submitRaw()`。
 
 ---
 

@@ -12,6 +12,7 @@
 #include <cstdint>
 
 #include "core/errors.h"
+#include "core/raster_channels.h"
 
 namespace ijpd {
 
@@ -23,9 +24,11 @@ public:
     Err start() noexcept;
 
     // 开始一个还原任务:像素宽/高、位深(1|8)、平面数、每行字节数。
-    // 页缓存按需分配(PSRAM);分配失败时返回错误且显示降级。
+    // 页缓存按需分配(PSRAM);显示不可用时返回错误,由打印服务降级。
     Err begin_job(uint32_t width_px, uint32_t height_px, uint32_t bits,
-                  uint32_t planes, uint32_t bytes_per_row) noexcept;
+                  uint32_t planes, uint32_t bytes_per_row,
+                  const RasterChannel* channel_order = nullptr,
+                  uint32_t channel_order_count = 0) noexcept;
 
     // 打印行到达(单写者:print 任务)。非活动任务时为空操作。
     void feed_row(uint32_t row_index, const uint8_t* data, size_t len) noexcept;
@@ -39,6 +42,8 @@ public:
 private:
     DisplayService() noexcept = default;
     static void flush_task_(void* arg) noexcept;
+    void render_preview_row_(uint32_t display_row) noexcept;
+    void render_incremental_() noexcept;
     void render_frame_() noexcept;
 
     struct Impl;

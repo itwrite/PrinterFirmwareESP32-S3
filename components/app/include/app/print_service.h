@@ -43,6 +43,7 @@ public:
 
     // 数据 TCP 接受策略（ControlTcpServer 空闲时调用? -> DataTcpServer 回调）
     static bool data_accept(void* user, int fd, const char* peer) noexcept;
+    static bool raw_accept(void* user, int fd, const char* peer) noexcept;
 
     // Router 钩子
     static Err hook_start_print(void* user, const StartPrintParams& p,
@@ -70,6 +71,8 @@ private:
     void buffered_print_step_() noexcept;   // 打印相:缓存出行(print 任务)
     void finish_buffered_(PrintPipeline::Event::Kind kind, Err code) noexcept;
     void close_data_socket_() noexcept;
+    void close_raw_socket_() noexcept;
+    void finish_raw_(PrintPipeline::Event::Kind kind, Err code) noexcept;
     void request_close_data_() noexcept;
     void check_timeouts_(uint64_t now) noexcept;
     bool serialize_event_(const PrintPipeline::Event& ev, char* buf, size_t cap,
@@ -98,6 +101,15 @@ private:
     volatile bool close_req_ = false;
     // uint32 毫秒（回绕安全差值比较；rx 与 ctrl 跨任务访问）
     volatile uint32_t last_rx_ms_ = 0;
+    volatile int raw_fd_ = -1;
+    volatile bool raw_active_ = false;
+    volatile bool raw_close_req_ = false;
+    volatile uint8_t raw_close_kind_ =
+        static_cast<uint8_t>(PrintPipeline::Event::Kind::Failed);
+    volatile Err raw_close_code_ = Err::DATA_CONNECTION_LOST;
+    volatile uint32_t raw_chunks_ = 0;
+    volatile uint64_t raw_bytes_ = 0;
+    uint64_t raw_started_ms_ = 0;
     // 图片指纹（端到端校验）：print 任务写，report 任务读
     volatile uint32_t fp_state_ = CRC32_INIT_STATE;
     volatile uint32_t fp_bytes_ = 0;

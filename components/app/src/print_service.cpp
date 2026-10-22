@@ -225,13 +225,13 @@ Err PrintService::start(PlatformMemory* mem, ControlPlane* plane) noexcept {
 Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
                                    JsonWriter& w) noexcept {
     auto* self = static_cast<PrintService*>(user);
-    if (self->pipeline_.active()) {
+    if (self->pipeline_.active() || self->raw_active_) {
         return Err::JOB_ALREADY_RUNNING;
     }
     // 上一任务已终态但数据 socket 清理尚未完成(rx_task 异步执行):
     // 此时接受新任务会在数据连接接入时被拒。直接回忙,客户端稍后重试即可
     // (清理通常在微秒~毫秒级完成)。
-    if (self->data_fd_ >= 0 || self->close_req_) {
+    if (self->data_fd_ >= 0 || self->raw_fd_ >= 0 || self->close_req_) {
         return Err::JOB_ALREADY_RUNNING;
     }
     if (!self->mem_->psram_available) {
@@ -275,8 +275,9 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
         p.total_rows / d_planes <= 4000 && p.total_rows % d_planes == 0;
     self->buffered_ =
         fits_page && DisplayService::instance().begin_job(
-                         p.bytes_per_row * 8 / d_bits, p.total_rows / d_planes,
-                         d_bits, d_planes, p.bytes_per_row) == Err::OK;
+                          p.bytes_per_row * 8 / d_bits, p.total_rows / d_planes,
+                          d_bits, d_planes, p.bytes_per_row,
+                          p.channel_order, p.channel_order_count) == Err::OK;
     if (self->buffered_) {
         // 直通模式:不走槽池流水线,本地帧解析 + 页缓存
         self->buf_cfg_ = BinFrameParser::JobConfig{};
@@ -328,7 +329,7 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
             p.total_rows % d_planes == 0) {
             (void)DisplayService::instance().begin_job(
                 p.bytes_per_row * 8 / d_bits, p.total_rows / d_planes, d_bits,
-                d_planes, p.bytes_per_row);
+                d_planes, p.bytes_per_row, p.channel_order, p.channel_order_count);
         }
     }
 
@@ -370,6 +371,74 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     return w.end_object() ? Err::OK : Err::INTERNAL_ERROR;
 }
 
+bool PrintService::raw_accept(void* user, int fd, const char* peer) noexcept {
+    auto* self = static_cast<PrintService*>(user);
+    if (!self->mem_->psram_available || self->raw_active_ ||
+        self->pipeline_.active() || self->buffered_ || self->data_fd_ >= 0) {
+        return false;
+    }
+
+    self->raw_fd_ = fd;
+    self->raw_active_ = true;
+    self->raw_close_req_ = false;
+    self->raw_close_kind_ = static_cast<uint8_t>(PrintPipeline::Event::Kind::Completed);
+    self->raw_close_code_ = Err::OK;
+    self->raw_chunks_ = 0;
+    self->raw_bytes_ = 0;
+    self->raw_started_ms_ = task_layout::now_ms();
+    self->last_rx_ms_ = static_cast<uint32_t>(self->raw_started_ms_);
+    self->fp_state_ = CRC32_INIT_STATE;
+    self->fp_bytes_ = 0;
+    strncpy(self->job_id_, "escpos-raw", sizeof(self->job_id_) - 1);
+    self->job_id_[sizeof(self->job_id_) - 1] = '\0';
+
+    const PrintheadConfig ph{0, 1, 0, 512};
+    if (self->printhead_.begin(ph) != Err::OK) {
+        self->raw_active_ = false;
+        self->raw_fd_ = -1;
+        return false;
+    }
+    IJPD_LOGI(kTag, "raw escpos conn accepted from %s", peer);
+    return true;
+}
+
+void PrintService::close_raw_socket_() noexcept {
+    const int fd = raw_fd_;
+    raw_fd_ = -1;
+    raw_close_req_ = false;
+    raw_active_ = false;
+    if (fd >= 0) {
+        lwip_shutdown(fd, SHUT_RDWR);
+        lwip_close(fd);
+    }
+}
+
+void PrintService::finish_raw_(PrintPipeline::Event::Kind kind, Err code) noexcept {
+    if (!raw_active_) return;
+    raw_close_kind_ = static_cast<uint8_t>(kind);
+    raw_close_code_ = code;
+    raw_active_ = false;
+    close_raw_socket_();
+
+    PrintPipeline::Event ev{};
+    ev.kind = kind;
+    ev.code = code;
+    ev.state = (kind == PrintPipeline::Event::Kind::Completed)
+                   ? JobState::Completed
+                   : (kind == PrintPipeline::Event::Kind::Cancelled
+                          ? JobState::Cancelled
+                          : JobState::Error);
+    ev.stats.packets_received = raw_chunks_;
+    ev.stats.packets_decoded = raw_chunks_;
+    ev.stats.bytes_decoded = raw_bytes_;
+    ev.stats.bytes_printed = raw_bytes_;
+    ev.duration_ms = task_layout::now_ms() - raw_started_ms_;
+    enqueue_event_(ev);
+    IJPD_LOGI(kTag, "raw escpos terminal: kind=%d code=%s bytes=%llu",
+              static_cast<int>(kind), err_name(code),
+              static_cast<unsigned long long>(raw_bytes_));
+}
+
 Err PrintService::hook_cancel_print(void* user, const CancelPrintParams& p,
                                     JsonWriter& w) noexcept {
     auto* self = static_cast<PrintService*>(user);
@@ -388,6 +457,14 @@ Err PrintService::hook_cancel_print(void* user, const CancelPrintParams& p,
         }
         return w.end_object() ? Err::OK : Err::INTERNAL_ERROR;
     }
+    if (self->raw_active_) {
+        self->raw_close_kind_ = static_cast<uint8_t>(PrintPipeline::Event::Kind::Cancelled);
+        self->raw_close_code_ = Err::JOB_CANCELLED;
+        self->raw_close_req_ = true;
+        if (!w.begin_object() || !w.kv_cstr("job_id", self->job_id_) ||
+            !w.kv_cstr("status", "cancelling")) return Err::INTERNAL_ERROR;
+        return w.end_object() ? Err::OK : Err::INTERNAL_ERROR;
+    }
     if (!self->pipeline_.active()) return Err::NO_ACTIVE_JOB;
     self->pipeline_.cancel();
     if (!w.begin_object() || !w.kv_cstr("job_id", self->job_id_) ||
@@ -400,6 +477,20 @@ Err PrintService::hook_cancel_print(void* user, const CancelPrintParams& p,
 Err PrintService::hook_print_status(void* user, JsonWriter& w) noexcept {
     auto* self = static_cast<PrintService*>(user);
     const auto s = self->pipeline_.snapshot();
+    if (self->raw_active_) {
+        if (!w.begin_object() || !w.kv_cstr("job_id", self->job_id_) ||
+            !w.kv_cstr("status", "printing") || !w.kv_i64("generation", 0) ||
+            !w.key("stats") || !w.begin_object() ||
+            !w.kv_i64("packets_received", self->raw_chunks_) ||
+            !w.kv_i64("packets_decoded", self->raw_chunks_) ||
+            !w.kv_i64("bytes_decoded", self->raw_bytes_) ||
+            !w.kv_i64("bytes_printed", self->raw_bytes_) ||
+            !w.kv_i64("queue_watermark", 0) ||
+            !w.kv_i64("queue_watermark_max", 0) ||
+            !w.kv_i64("throughput_bps", 0) ||
+            !w.end_object() || !w.end_object()) return Err::INTERNAL_ERROR;
+        return Err::OK;
+    }
     const bool has_job = self->job_id_[0] != '\0';
     if (!w.begin_object()) return Err::INTERNAL_ERROR;
     if (has_job ? !w.kv_cstr("job_id", self->job_id_) : !w.kv_null("job_id")) {
@@ -428,7 +519,9 @@ Err PrintService::hook_print_status(void* user, JsonWriter& w) noexcept {
 Err PrintService::hook_feed_paper(void* user, const FeedPaperParams& p,
                                   JsonWriter& w) noexcept {
     auto* self = static_cast<PrintService*>(user);
-    if (self->pipeline_.active()) return Err::JOB_ALREADY_RUNNING;
+    if (self->pipeline_.active() || self->buffered_ || self->raw_active_) {
+        return Err::JOB_ALREADY_RUNNING;
+    }
     uint32_t moved = 0;
     const Err e = self->stepper_.feed(FeedRequest{p.distance_um, 50000}, &moved);
     if (e != Err::OK) return e;
@@ -623,6 +716,20 @@ void PrintService::request_close_data_() noexcept { close_req_ = true; }
 // ---------------------------------------------------------------- 超时看护
 
 void PrintService::check_timeouts_(uint64_t now) noexcept {
+    if (raw_active_) {
+        const uint32_t last = last_rx_ms_;
+        if (raw_close_req_) return;
+        if (now >= last && now - last >= cfg::PACKET_IDLE_TIMEOUT_MS) {
+            raw_close_kind_ = static_cast<uint8_t>(PrintPipeline::Event::Kind::Failed);
+            raw_close_code_ = Err::JOB_TIMEOUT;
+            raw_close_req_ = true;
+        } else if (now - raw_started_ms_ >= cfg::JOB_TOTAL_TIMEOUT_MS) {
+            raw_close_kind_ = static_cast<uint8_t>(PrintPipeline::Event::Kind::Failed);
+            raw_close_code_ = Err::JOB_TIMEOUT;
+            raw_close_req_ = true;
+        }
+        return;
+    }
     if (buffered_ && (buf_receiving_ || buf_printing_)) {
         const uint64_t started = buf_started_ms_;
         // 多核读序:last_rx 可能被 rx 任务(另一核)更新到比 now 更晚。
@@ -687,9 +794,43 @@ void PrintService::rx_task_(void* arg) noexcept {
         if (self->close_req_) {
             self->close_data_socket_();
         }
+        if (self->raw_close_req_ && self->raw_active_) {
+            self->finish_raw_(static_cast<PrintPipeline::Event::Kind>(self->raw_close_kind_),
+                              self->raw_close_code_);
+            continue;
+        }
+        if (self->raw_active_) {
+            const int raw_fd = self->raw_fd_;
+            if (raw_fd < 0) {
+                self->finish_raw_(PrintPipeline::Event::Kind::Failed,
+                                  Err::DATA_CONNECTION_LOST);
+                continue;
+            }
+            const ssize_t n = lwip_recv(raw_fd, buf, sizeof(buf), MSG_DONTWAIT);
+            if (n > 0) {
+                self->last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
+                const Err e = self->printhead_.submitRaw(buf, static_cast<size_t>(n));
+                if (e != Err::OK) {
+                    self->finish_raw_(PrintPipeline::Event::Kind::Failed, Err::HAL_FAULT);
+                } else {
+                    self->fp_state_ = crc32_update(self->fp_state_, buf, static_cast<size_t>(n));
+                    self->fp_bytes_ += static_cast<uint32_t>(n);
+                    self->raw_chunks_++;
+                    self->raw_bytes_ += static_cast<size_t>(n);
+                }
+            } else if (n == 0) {
+                self->finish_raw_(PrintPipeline::Event::Kind::Completed, Err::OK);
+            } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                self->finish_raw_(PrintPipeline::Event::Kind::Failed,
+                                  Err::DATA_CONNECTION_LOST);
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(2));
+            }
+            continue;
+        }
         const int fd = self->data_fd_;
         // 直通模式下流水线未启动,读取条件须显式包含 buffered_
-        if (fd < 0 || (!self->pipeline_.active() && !self->buffered_)) {
+        if (fd < 0 || (!self->pipeline_.active() && !self->buffered_ && !self->raw_active_)) {
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }

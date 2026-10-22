@@ -19,7 +19,7 @@
 
 namespace ijpd {
 
-enum class ParamType : uint8_t { Integer, String, Boolean, Enum };
+enum class ParamType : uint8_t { Integer, String, Boolean, Enum, StringArray };
 
 struct ParamSpec {
     const char* key;
