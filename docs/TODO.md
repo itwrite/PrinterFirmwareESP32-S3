@@ -15,6 +15,9 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [x] RAW job exclusivity, cancellation, idle/total timeout handling and terminal events.
 - [x] Host test suite: 18/18 passing.
 - [x] ESP-IDF firmware build passing.
+- [x] MQTT control adapter foundation with bounded command reassembly.
+- [x] MQTT `IJCH` chunk envelope validation and host coverage.
+- [x] Optional IPP HTTP foundation with `Get-Printer-Attributes` and explicit `Print-Job` rejection.
 
 ## Current Limitations
 
