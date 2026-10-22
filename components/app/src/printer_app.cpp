@@ -166,9 +166,8 @@ Err PrinterApp::start() noexcept {
         IJPD_LOGW(kTag, "escpos raw disabled: profile does not support escpos");
         config_.services.escpos_raw_tcp = false;
     }
-    if (config_.services.mqtt || config_.services.airprint) {
-        IJPD_LOGW(kTag, "mqtt/airprint adapters are not enabled in this build");
-        config_.services.mqtt = false;
+    if (config_.services.airprint) {
+        IJPD_LOGW(kTag, "airprint adapter is not enabled in this build");
         config_.services.airprint = false;
     }
 
@@ -292,7 +291,7 @@ Err PrinterApp::start() noexcept {
 
     if (!config_.services.ijpd_tcp &&
         (config_.services.ble || config_.services.wifi ||
-         config_.services.escpos_raw_tcp)) {
+         config_.services.escpos_raw_tcp || config_.services.mqtt)) {
         service_tick_running_ = true;
         e = task_layout::spawn("app_tick", service_tick_task_, this, 0,
                                task_layout::kPrioCtrl, 3072);

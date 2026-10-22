@@ -32,14 +32,13 @@ Err MqttAdapter::start(const char* uri, const char* base_topic, const char* devi
     }
     if (started_) return Err::OK;
 
-    command_queue_ = xQueueCreate(kCommandQueueDepth, sizeof(CommandMessage));
-    if (command_queue_ == nullptr) return Err::OUT_OF_MEMORY;
-
     const int n = snprintf(event_topic_, sizeof(event_topic_), "%s/%s/event",
                            base_topic, device_id);
     if (n <= 0 || static_cast<size_t>(n) >= sizeof(event_topic_)) {
         return Err::INVALID_ARGUMENT;
     }
+    command_queue_ = xQueueCreate(kCommandQueueDepth, sizeof(CommandMessage));
+    if (command_queue_ == nullptr) return Err::OUT_OF_MEMORY;
 
     esp_mqtt_client_config_t cfg{};
     cfg.broker.address.uri = uri;

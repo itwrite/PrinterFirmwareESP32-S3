@@ -34,9 +34,10 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [x] Reassemble fragmented MQTT messages in a bounded queue and dispatch them
   from the app tick, not the MQTT callback thread.
 - [ ] Define topic namespace: `<base>/<device_id>/command`, `/event`, `/state`, `/job/<job_id>/chunk`.
+- [x] Define bounded binary chunk envelope: `IJCH` version 1, job ID, index, total, length and payload CRC32.
 - [ ] Implement command messages with `msg_id`, `cmd`, and JSON `data`.
 - [ ] Publish command responses/events with QoS 1 and no retained job payloads.
-- [ ] Add bounded chunk ingestion with job ID, index, total chunks, byte length and CRC32.
+- [x] Add bounded chunk envelope validation with job ID, index, total chunks, byte length and CRC32.
 - [ ] Route accepted chunks into the same job backend used by IJPD, without duplicating print logic.
 - [x] Reject MQTT startup when URI/topic configuration is incomplete.
 - [ ] Add host tests for topic parsing, duplicate chunks, missing chunks and CRC errors.

@@ -11,6 +11,7 @@ idf_component_register(
          "src/job_state_machine.cpp"
          "src/json_lite.cpp"
          "src/lz4_block.cpp"
+         "src/mqtt_chunk_protocol.cpp"
          "src/print_pipeline.cpp"
          "src/slot_pool.cpp"
          "src/stats.cpp"
