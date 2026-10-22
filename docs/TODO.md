@@ -18,6 +18,7 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [x] MQTT control adapter foundation with bounded command reassembly.
 - [x] MQTT `IJCH` chunk envelope validation and host coverage.
 - [x] Optional IPP HTTP foundation with `Get-Printer-Attributes` and explicit `Print-Job` rejection.
+- [x] IPP `Validate-Job` format gate; unsupported document formats are rejected.
 
 ## Current Limitations
 
