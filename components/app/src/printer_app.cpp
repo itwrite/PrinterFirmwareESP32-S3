@@ -80,6 +80,7 @@ void PrinterApp::service_tick_task_(void* user) noexcept {
 
 void PrinterApp::tick_services_() noexcept {
     if (config_.services.ble) ble_.poll();  // BLE 队列 -> 控制面
+    if (config_.services.mqtt) mqtt_.poll();
     plane_.tick(task_layout::now_ms());
     PrintService::instance().tick();  // 任务超时看护
     wifi_.stop_portal_if_connected();  // Wi-Fi 连上后关配网门户
@@ -120,6 +121,18 @@ void PrinterApp::ble_feed(void* user, const uint8_t* data, size_t len) noexcept 
 
 Err PrinterApp::ble_send(void* user, const uint8_t* data, size_t len) noexcept {
     return static_cast<PrinterApp*>(user)->ble_.send(data, len);
+}
+
+void PrinterApp::mqtt_feed(void* user, const char* data, size_t len) noexcept {
+    auto* self = static_cast<PrinterApp*>(user);
+    self->plane_.feed(ControlPlane::kChannelMqtt,
+                      reinterpret_cast<const uint8_t*>(data), len,
+                      task_layout::now_ms());
+}
+
+Err PrinterApp::mqtt_send(void* user, const uint8_t* data, size_t len) noexcept {
+    return static_cast<PrinterApp*>(user)->mqtt_.publish_event(
+        reinterpret_cast<const char*>(data), len);
 }
 
 bool PrinterApp::data_accept(void* user, int fd, const char* peer) noexcept {
@@ -263,6 +276,18 @@ Err PrinterApp::start() noexcept {
             IJPD_LOGE(kTag, "ble start failed: %s", err_name(e));
             return e;
         }
+    }
+
+    if (config_.services.mqtt) {
+        MqttAdapter::Host mqtt_host;
+        mqtt_host.user = this;
+        mqtt_host.on_command = mqtt_feed;
+        e = mqtt_.start(config_.mqtt_uri, config_.mqtt_base_topic, device_id_, mqtt_host);
+        if (e != Err::OK) {
+            IJPD_LOGE(kTag, "mqtt start failed: %s", err_name(e));
+            return e;
+        }
+        plane_.set_sink(ControlPlane::kChannelMqtt, {this, mqtt_send});
     }
 
     if (!config_.services.ijpd_tcp &&

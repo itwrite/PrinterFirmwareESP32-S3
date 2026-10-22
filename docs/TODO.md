@@ -20,20 +20,25 @@ checkboxes and the next-stage section whenever a stage is completed.
 
 - [ ] RAW TCP is only a byte-stream ingress until a real thermal `submitRaw()` HAL is supplied.
 - [ ] BLE is custom IJPD GATT, not Bluetooth Classic SPP.
-- [ ] MQTT adapter is not enabled or implemented.
+- [ ] MQTT adapter is not enabled by the default firmware variant.
 - [ ] AirPrint IPP/HTTP service and document parsing are not implemented.
 - [ ] PDF/PWG Raster/Apple Raster conversion is not implemented on-device.
 - [ ] Real printhead, stepper, cutter and sensor HALs remain hardware-specific.
 
 ## Next Stage: MQTT Control Adapter
 
-- [ ] Add an optional ESP-IDF `esp-mqtt` adapter, disabled unless `PrinterConfig.services.mqtt` is true.
+- [x] Add an optional ESP-IDF `esp-mqtt` adapter foundation, disabled unless `PrinterConfig.services.mqtt` is true.
+- [x] Validate URI/base topic/client identity before startup; invalid MQTT configuration is rejected by the adapter.
+- [x] Subscribe to `<base>/<device_id>/command` and publish events to `<base>/<device_id>/event`.
+- [x] Route complete MQTT command payloads into the shared ControlPlane channel.
+- [x] Reassemble fragmented MQTT messages in a bounded queue and dispatch them
+  from the app tick, not the MQTT callback thread.
 - [ ] Define topic namespace: `<base>/<device_id>/command`, `/event`, `/state`, `/job/<job_id>/chunk`.
 - [ ] Implement command messages with `msg_id`, `cmd`, and JSON `data`.
 - [ ] Publish command responses/events with QoS 1 and no retained job payloads.
 - [ ] Add bounded chunk ingestion with job ID, index, total chunks, byte length and CRC32.
 - [ ] Route accepted chunks into the same job backend used by IJPD, without duplicating print logic.
-- [ ] Reject MQTT startup when URI/topic configuration is incomplete.
+- [x] Reject MQTT startup when URI/topic configuration is incomplete.
 - [ ] Add host tests for topic parsing, duplicate chunks, missing chunks and CRC errors.
 
 ## Following Stage: AirPrint Foundation

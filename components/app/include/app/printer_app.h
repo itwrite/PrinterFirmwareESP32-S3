@@ -21,6 +21,7 @@
 #include "platform_esp/control_tcp_server.h"
 #include "platform_esp/data_tcp_server.h"
 #include "platform_esp/raw_tcp_server.h"
+#include "platform_esp/mqtt_adapter.h"
 #include "platform_esp/psram_allocator.h"
 #include "platform_esp/wifi_manager.h"
 
@@ -61,6 +62,8 @@ private:
     // BleControlServer Host 适配
     static void ble_feed(void* user, const uint8_t* data, size_t len) noexcept;
     static Err ble_send(void* user, const uint8_t* data, size_t len) noexcept;
+    static void mqtt_feed(void* user, const char* data, size_t len) noexcept;
+    static Err mqtt_send(void* user, const uint8_t* data, size_t len) noexcept;
 
     // DataTcpServer 策略：Phase 5 无任务等待，一律拒绝
     static bool data_accept(void* user, int fd, const char* peer) noexcept;
@@ -73,6 +76,7 @@ private:
     ControlTcpServer ctl_tcp_;
     DataTcpServer data_tcp_;
     RawTcpServer raw_tcp_;
+    MqttAdapter mqtt_;
     BleControlServer ble_;
 
     DeviceInfo di_{};

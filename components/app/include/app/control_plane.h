@@ -29,8 +29,9 @@ namespace ijpd {
 
 class ControlPlane {
 public:
-    static constexpr int kMaxChannels = 3;   // TCP conn0 / TCP conn1 / BLE
+    static constexpr int kMaxChannels = 4;   // TCP conn0 / TCP conn1 / BLE / MQTT
     static constexpr int kChannelBle = 2;
+    static constexpr int kChannelMqtt = 3;
 
     using SendFn = Err (*)(void* user, const uint8_t* data, size_t len);
     struct Sink {
