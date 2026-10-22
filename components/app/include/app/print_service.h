@@ -24,6 +24,7 @@
 #include "core/command_router.h"
 #include "core/crc32.h"
 #include "core/mqtt_chunk_protocol.h"
+#include "core/pwg_raster.h"
 #include "core/print_pipeline.h"
 #include "printer_hal/cutter_hal.h"
 #include "printer_hal/printhead_hal.h"
@@ -47,6 +48,10 @@ public:
     static bool raw_accept(void* user, int fd, const char* peer) noexcept;
     static void mqtt_chunk(void* user, const uint8_t* data, size_t len) noexcept;
     static void mqtt_disconnected(void* user) noexcept;
+    static Err ipp_begin_page(void* user, const PwgRasterPage& page) noexcept;
+    static Err ipp_write_row(void* user, const uint8_t* row, size_t len,
+                             uint32_t row_index) noexcept;
+    static Err ipp_end_page(void* user, Err status) noexcept;
 
     void set_mqtt_context(const char* base_topic, const char* device_id) noexcept;
 
@@ -123,6 +128,9 @@ private:
     MqttChunkSequence mqtt_sequence_{};
     char mqtt_base_topic_[128] = {};
     char mqtt_device_id_[32] = {};
+    void* ipp_done_sem_ = nullptr;  // SemaphoreHandle_t
+    volatile bool ipp_active_ = false;
+    volatile Err ipp_result_ = Err::OK;
     // 图片指纹（端到端校验）：print 任务写，report 任务读
     volatile uint32_t fp_state_ = CRC32_INIT_STATE;
     volatile uint32_t fp_bytes_ = 0;

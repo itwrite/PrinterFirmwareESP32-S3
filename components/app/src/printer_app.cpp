@@ -289,7 +289,13 @@ Err PrinterApp::start() noexcept {
     }
 
     if (config_.services.airprint) {
-        e = ipp_.start(config_.airprint_port, config_.device_model, config_.profile);
+        IppServer::Host ipp_host;
+        ipp_host.user = this;
+        ipp_host.begin_page = PrintService::ipp_begin_page;
+        ipp_host.write_row = PrintService::ipp_write_row;
+        ipp_host.end_page = PrintService::ipp_end_page;
+        e = ipp_.start(config_.airprint_port, config_.device_model, config_.profile,
+                       ipp_host);
         if (e != Err::OK) {
             IJPD_LOGE(kTag, "IPP foundation start failed: %s", err_name(e));
             return e;

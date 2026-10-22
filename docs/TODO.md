@@ -51,11 +51,11 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [ ] Add optional `_ipp._tcp` mDNS advertisement, disabled by default.
 - [x] Add `esp_http_server` listener on the configured IPP port (default 631).
 - [x] Implement a minimal `Get-Printer-Attributes` response with Profile model data.
-- [x] Explicitly reject `Print-Job` until a bounded document backend exists.
+- [x] Implement bounded single-page PWG Raster `Print-Job` for Mono1 profiles.
 - [x] Implement `Validate-Job` rejection for unsupported document formats.
 - [x] Select and document the first supported document format: PWG Raster v2 header/row layout.
 - [x] Add a bounded platform-independent PWG Raster v2 header parser and host tests.
-- [ ] Add a bounded document upload path and translate accepted pages into the raster job backend.
+- [x] Add a bounded document upload path and translate accepted pages into the raster job backend.
 - [ ] Do not advertise AirPrint until `Print-Job` and at least one document format are functional.
 
 ## Protocol and HAL Follow-up

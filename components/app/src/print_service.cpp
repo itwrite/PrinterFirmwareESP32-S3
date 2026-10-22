@@ -13,6 +13,7 @@
 #include "core/lz4_block.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 
@@ -78,6 +79,7 @@ Err PrintService::os_print_row(void* user, const uint8_t* row, size_t len,
     self->fp_bytes_ += len;
     // 还原显示:行数据同步进屏幕页缓存(非活动任务为空操作)
     DisplayService::instance().feed_row(row_index, row, len);
+    self->last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
     RasterMeta m{row_index};
     return self->printhead_.submitRaster(row, len, m);
 }
@@ -208,6 +210,8 @@ Err PrintService::start(PlatformMemory* mem, ControlPlane* plane) noexcept {
 
     event_queue_ = xQueueCreate(kEventQueueDepth, sizeof(EventItem));
     if (event_queue_ == nullptr) return Err::OUT_OF_MEMORY;
+    ipp_done_sem_ = xSemaphoreCreateBinary();
+    if (ipp_done_sem_ == nullptr) return Err::OUT_OF_MEMORY;
 
     running_ = true;
     Err e = task_layout::spawn("rx", rx_task_, this, 0, task_layout::kPrioRx,
@@ -240,7 +244,7 @@ Err PrintService::start(PlatformMemory* mem, ControlPlane* plane) noexcept {
 Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
                                    JsonWriter& w) noexcept {
     auto* self = static_cast<PrintService*>(user);
-    if (self->pipeline_.active() || self->raw_active_) {
+    if (self->pipeline_.active() || self->raw_active_ || self->ipp_active_) {
         return Err::JOB_ALREADY_RUNNING;
     }
     // 上一任务已终态但数据 socket 清理尚未完成(rx_task 异步执行):
@@ -448,6 +452,86 @@ void PrintService::mqtt_disconnected(void* user) noexcept {
     if (self->mqtt_transport_) self->fail_mqtt_job_(Err::DATA_CONNECTION_LOST);
 }
 
+Err PrintService::ipp_begin_page(void* user, const PwgRasterPage& page) noexcept {
+    auto* self = static_cast<PrintService*>(user);
+    if (!self->mem_->psram_available || self->pipeline_.active() ||
+        self->buffered_ || self->raw_active_ || self->data_fd_ >= 0 ||
+        self->ipp_active_) return Err::JOB_ALREADY_RUNNING;
+    if (page.bits_per_pixel != 1 || page.bits_per_color != 1 ||
+        page.bytes_per_line == 0 || page.total_bytes == 0) {
+        return Err::UNSUPPORTED;
+    }
+    const RasterChannel black = RasterChannel::Black;
+    const Err display = DisplayService::instance().begin_job(
+        page.width, page.height, 1, 1, page.bytes_per_line, &black, 1);
+    if (display != Err::OK) return display;
+    if (xSemaphoreTake(static_cast<SemaphoreHandle_t>(self->ipp_done_sem_), 0) == pdTRUE) {
+        // Drain an old terminal notification before starting the next page.
+    }
+    snprintf(self->job_id_, sizeof(self->job_id_), "ipp-%llu",
+             static_cast<unsigned long long>(task_layout::now_ms()));
+    self->buf_cfg_ = BinFrameParser::JobConfig{};
+    self->buf_cfg_.total_bytes_uncompressed = page.total_bytes;
+    self->buf_total_rows_ = page.height;
+    self->buffered_ = true;
+    self->buf_carry_len_ = 0;
+    self->buf_rows_stored_ = 0;
+    self->buf_rows_printed_ = 0;
+    self->buf_recv_bytes_ = 0;
+    self->buf_pkts_ = 0;
+    self->buf_started_ms_ = task_layout::now_ms();
+    self->buf_receiving_ = true;
+    self->buf_printing_ = true;
+    self->buf_cancel_ = false;
+    self->ipp_result_ = Err::OK;
+    self->ipp_active_ = true;
+    if (self->printhead_.begin(PrintheadConfig{page.bytes_per_line, 2000, 0}) != Err::OK) {
+        self->buffered_ = false;
+        self->ipp_active_ = false;
+        self->buf_printing_ = false;
+        self->buf_receiving_ = false;
+        DisplayService::instance().end_job();
+        return Err::HAL_FAULT;
+    }
+    return Err::OK;
+}
+
+Err PrintService::ipp_write_row(void* user, const uint8_t* row, size_t len,
+                                uint32_t row_index) noexcept {
+    auto* self = static_cast<PrintService*>(user);
+    if (!self->ipp_active_ || !self->buffered_ || row == nullptr ||
+        row_index != self->buf_rows_stored_ || len != self->buf_cfg_.total_bytes_uncompressed /
+        self->buf_total_rows_) return Err::INVALID_ARGUMENT;
+    DisplayService::instance().feed_row(row_index, row, len);
+    self->buf_rows_stored_++;
+    self->buf_recv_bytes_ += len;
+    return Err::OK;
+}
+
+Err PrintService::ipp_end_page(void* user, Err status) noexcept {
+    auto* self = static_cast<PrintService*>(user);
+    if (!self->ipp_active_) return status;
+    if (status != Err::OK) {
+        self->buf_cancel_ = true;
+        self->finish_buffered_(PrintPipeline::Event::Kind::Failed, status);
+        return status;
+    }
+    if (self->buf_rows_stored_ != self->buf_total_rows_) {
+        self->buf_cancel_ = true;
+        self->finish_buffered_(PrintPipeline::Event::Kind::Failed,
+                               Err::DECOMPRESSED_LENGTH_MISMATCH);
+        return Err::DECOMPRESSED_LENGTH_MISMATCH;
+    }
+    self->buf_receiving_ = false;
+    if (xSemaphoreTake(static_cast<SemaphoreHandle_t>(self->ipp_done_sem_),
+                       pdMS_TO_TICKS(cfg::JOB_TOTAL_TIMEOUT_MS)) != pdTRUE) {
+        self->buf_cancel_ = true;
+        self->finish_buffered_(PrintPipeline::Event::Kind::Failed, Err::JOB_TIMEOUT);
+        return Err::JOB_TIMEOUT;
+    }
+    return self->ipp_result_;
+}
+
 void PrintService::fail_mqtt_job_(Err code) noexcept {
     if (buffered_) {
         finish_buffered_(PrintPipeline::Event::Kind::Failed, code);
@@ -558,6 +642,13 @@ Err PrintService::hook_cancel_print(void* user, const CancelPrintParams& p,
         self->raw_close_kind_ = static_cast<uint8_t>(PrintPipeline::Event::Kind::Cancelled);
         self->raw_close_code_ = Err::JOB_CANCELLED;
         self->raw_close_req_ = true;
+        if (!w.begin_object() || !w.kv_cstr("job_id", self->job_id_) ||
+            !w.kv_cstr("status", "cancelling")) return Err::INTERNAL_ERROR;
+        return w.end_object() ? Err::OK : Err::INTERNAL_ERROR;
+    }
+    if (self->ipp_active_) {
+        self->buf_cancel_ = true;
+        self->finish_buffered_(PrintPipeline::Event::Kind::Cancelled, Err::JOB_CANCELLED);
         if (!w.begin_object() || !w.kv_cstr("job_id", self->job_id_) ||
             !w.kv_cstr("status", "cancelling")) return Err::INTERNAL_ERROR;
         return w.end_object() ? Err::OK : Err::INTERNAL_ERROR;
@@ -750,12 +841,19 @@ void PrintService::buffered_print_step_() noexcept {
 
 // 直通任务终态:事件 + 显示定格 + 数据连接关闭
 void PrintService::finish_buffered_(PrintPipeline::Event::Kind kind,
-                                    Err code) noexcept {
+                                     Err code) noexcept {
     if (!buffered_) return;
     buf_printing_ = false;
     buf_receiving_ = false;
     DisplayService::instance().end_job();
-    request_close_data_();
+    if (data_fd_ >= 0 || close_req_) request_close_data_();
+    if (ipp_active_) {
+        ipp_result_ = code;
+        ipp_active_ = false;
+        if (ipp_done_sem_ != nullptr) {
+            xSemaphoreGive(static_cast<SemaphoreHandle_t>(ipp_done_sem_));
+        }
+    }
 
     PrintPipeline::Event ev{};
     ev.kind = kind;
