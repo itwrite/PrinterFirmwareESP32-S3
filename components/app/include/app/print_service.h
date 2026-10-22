@@ -23,6 +23,7 @@
 #include "core/bin_frame_parser.h"
 #include "core/command_router.h"
 #include "core/crc32.h"
+#include "core/mqtt_chunk_protocol.h"
 #include "core/print_pipeline.h"
 #include "printer_hal/cutter_hal.h"
 #include "printer_hal/printhead_hal.h"
@@ -44,6 +45,9 @@ public:
     // 数据 TCP 接受策略（ControlTcpServer 空闲时调用? -> DataTcpServer 回调）
     static bool data_accept(void* user, int fd, const char* peer) noexcept;
     static bool raw_accept(void* user, int fd, const char* peer) noexcept;
+    static void mqtt_chunk(void* user, const uint8_t* data, size_t len) noexcept;
+
+    void set_mqtt_context(const char* base_topic, const char* device_id) noexcept;
 
     // Router 钩子
     static Err hook_start_print(void* user, const StartPrintParams& p,
@@ -73,6 +77,8 @@ private:
     void close_data_socket_() noexcept;
     void close_raw_socket_() noexcept;
     void finish_raw_(PrintPipeline::Event::Kind kind, Err code) noexcept;
+    void accept_mqtt_chunk_(const uint8_t* data, size_t len) noexcept;
+    void fail_mqtt_job_(Err code) noexcept;
     void request_close_data_() noexcept;
     void check_timeouts_(uint64_t now) noexcept;
     bool serialize_event_(const PrintPipeline::Event& ev, char* buf, size_t cap,
@@ -110,6 +116,11 @@ private:
     volatile uint32_t raw_chunks_ = 0;
     volatile uint64_t raw_bytes_ = 0;
     uint64_t raw_started_ms_ = 0;
+    bool mqtt_transport_ = false;
+    uint32_t mqtt_next_chunk_ = 0;
+    uint32_t mqtt_total_chunks_ = 0;
+    char mqtt_base_topic_[128] = {};
+    char mqtt_device_id_[32] = {};
     // 图片指纹（端到端校验）：print 任务写，report 任务读
     volatile uint32_t fp_state_ = CRC32_INIT_STATE;
     volatile uint32_t fp_bytes_ = 0;

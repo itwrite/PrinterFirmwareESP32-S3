@@ -25,7 +25,9 @@ events are published to the event topic with QoS 1.
   command buffer before entering `ControlPlane`.
 - The adapter is polled from the app control tick; MQTT callbacks never call
   the non-thread-safe command router directly.
-- Large raster/ESC/POS payload transfer over MQTT is not implemented yet.
-- Retained job payloads, chunk indexes, CRC, duplicate detection and resume
-  are next-stage work. Until then, MQTT should be used only for control and
-  status messages.
+- Large payload transfer is available only for a job explicitly created with
+  `start_print.transport="mqtt"`; each `IJCH` chunk carries an IJPD Hello/frame
+  byte-stream fragment and is fed to the existing parser.
+- Retained job payloads, duplicate detection and resume are still next-stage
+  work. Chunks must arrive in order and a missing, duplicate, or out-of-order
+  chunk fails the active job.

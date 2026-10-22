@@ -41,7 +41,8 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [ ] Implement command messages with `msg_id`, `cmd`, and JSON `data`.
 - [ ] Publish command responses/events with QoS 1 and no retained job payloads.
 - [x] Add bounded chunk envelope validation with job ID, index, total chunks, byte length and CRC32.
-- [ ] Route accepted chunks into the same job backend used by IJPD, without duplicating print logic.
+- [x] Route accepted MQTT chunks into the same IJPD frame parser after `start_print.transport=mqtt`.
+- [x] Route MQTT chunks into the existing IJPD frame parser after `start_print.transport=mqtt`.
 - [x] Reject MQTT startup when URI/topic configuration is incomplete.
 - [ ] Add host tests for topic parsing, duplicate chunks, missing chunks and CRC errors.
 

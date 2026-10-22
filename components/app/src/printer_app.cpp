@@ -190,6 +190,7 @@ Err PrinterApp::start() noexcept {
         IJPD_LOGW(kTag, "display start failed (%s) - 打印不受影响", err_name(de));
     }
     PrintService& svc = PrintService::instance();
+    svc.set_mqtt_context(config_.mqtt_base_topic, device_id_);
     const Err se = svc.start(&mem_, &plane_);
     if (se != Err::OK) {
         IJPD_LOGE(kTag, "print service start failed: %s", err_name(se));
@@ -277,6 +278,7 @@ Err PrinterApp::start() noexcept {
         MqttAdapter::Host mqtt_host;
         mqtt_host.user = this;
         mqtt_host.on_command = mqtt_feed;
+        mqtt_host.on_chunk = PrintService::mqtt_chunk;
         e = mqtt_.start(config_.mqtt_uri, config_.mqtt_base_topic, device_id_, mqtt_host);
         if (e != Err::OK) {
             IJPD_LOGE(kTag, "mqtt start failed: %s", err_name(e));

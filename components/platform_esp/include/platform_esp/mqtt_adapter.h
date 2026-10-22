@@ -21,6 +21,7 @@ public:
     struct Host {
         void* user = nullptr;
         void (*on_command)(void* user, const char* data, size_t len) = nullptr;
+        void (*on_chunk)(void* user, const uint8_t* data, size_t len) = nullptr;
         void (*on_connected)(void* user) = nullptr;
     };
 
@@ -47,6 +48,13 @@ private:
     char command_buf_[cfg::MAX_CONTROL_FRAME_SIZE + 1] = {};
     size_t command_len_ = 0;
     std::atomic<bool> connected_pending_{false};
+    void* chunk_queue_ = nullptr;  // QueueHandle_t
+    void* chunk_buffers_[2] = {nullptr, nullptr};
+    std::atomic<uint8_t> chunk_free_mask_{0};
+    int chunk_slot_ = -1;
+    size_t chunk_len_ = 0;
+    bool message_is_chunk_ = false;
+    bool message_discard_ = false;
     bool started_ = false;
 };
 

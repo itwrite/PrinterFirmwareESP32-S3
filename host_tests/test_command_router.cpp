@@ -175,7 +175,8 @@ int main() {
         CHECK_EQ_STR(TestHooks::last_start.job_id, "job-001");
         CHECK_EQ(TestHooks::last_start.total_bytes_uncompressed, 120000);
         CHECK_EQ(TestHooks::last_start.total_packets, 30);
-        CHECK_TRUE(TestHooks::last_start.compression == Compression::Lz4Block);
+    CHECK_TRUE(TestHooks::last_start.compression == Compression::Lz4Block);
+        CHECK_TRUE(TestHooks::last_start.transport == StartPrintTransport::Tcp);
         CHECK_TRUE(TestHooks::last_start.integrity == Integrity::Crc32);
         CHECK_EQ(TestHooks::last_start.bytes_per_row, 1200);
         CHECK_EQ(TestHooks::last_start.total_rows, 100);
@@ -218,6 +219,17 @@ int main() {
         CHECK_TRUE(out.code == Err::OK);
         CHECK_EQ(TestHooks::last_start.nominal_packet_bytes, 500);
         CHECK_EQ(TestHooks::last_start.last_packet_bytes, 500);
+    }
+    {
+        CommandRouter r;
+        TestHooks::reset();
+        TestHooks::install(r);
+        const Out out = run(
+            r, R"({"msg_id":"m","cmd":"start_print","data":{"job_id":"mqtt-job",)"
+               R"("total_bytes_uncompressed":8,"total_packets":1,"compression":"none",)"
+               R"("transport":"mqtt","bytes_per_row":1,"total_rows":8}})");
+        CHECK_TRUE(out.code == Err::OK);
+        CHECK_TRUE(TestHooks::last_start.transport == StartPrintTransport::Mqtt);
     }
 
     // ================= 5. 语义校验失败（交叉字段） =================

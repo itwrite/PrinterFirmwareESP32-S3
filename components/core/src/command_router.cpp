@@ -543,6 +543,15 @@ Err CommandRouter::dispatch(const CommandSpec& spec, const Envelope& env,
                 return internal_fail(env, resp, resp_cap, resp_len);
             }
 
+            h = parser_.find(env.data, "transport");
+            if (h == JsonParser::kNone || parser_.str_equals(h, "tcp", 3)) {
+                p.transport = StartPrintTransport::Tcp;
+            } else if (parser_.str_equals(h, "mqtt", 4)) {
+                p.transport = StartPrintTransport::Mqtt;
+            } else {
+                return internal_fail(env, resp, resp_cap, resp_len);
+            }
+
             // bytes_per_row / total_rows：schema 层可选，此处按 mode 取值
             h = parser_.find(env.data, "bytes_per_row");
             if (h != JsonParser::kNone && parser_.as_i64(h, &v) == Err::OK) {

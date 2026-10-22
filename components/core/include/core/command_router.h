@@ -39,6 +39,8 @@ namespace ijpd {
 enum class StartPrintMode : uint8_t { Raster = 0, EscPos = 1 };
 const char* start_print_mode_name(StartPrintMode m) noexcept;
 
+enum class StartPrintTransport : uint8_t { Tcp = 0, Mqtt = 1 };
+
 // start_print 已验证参数（schema + 语义校验后；含派生量）
 struct StartPrintParams {
     char job_id[cfg::JOB_ID_MAX + 1];  // NUL 结尾
@@ -47,6 +49,7 @@ struct StartPrintParams {
     Compression compression;
     Integrity integrity;
     StartPrintMode mode = StartPrintMode::Raster;
+    StartPrintTransport transport = StartPrintTransport::Tcp;
     // raster 模式必填
     uint32_t bytes_per_row = 0;
     uint32_t total_rows = 0;
@@ -78,6 +81,7 @@ struct Capabilities {
     bool print_supported;  // PSRAM 可用等
     bool feed_supported;
     bool cutter_supported;
+    bool mqtt_supported = false;
 };
 
 class CommandRouter {

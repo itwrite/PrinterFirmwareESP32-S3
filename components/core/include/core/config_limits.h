@@ -41,6 +41,7 @@ inline constexpr size_t   JOB_ID_MAX         = 40;    // job_id 长度上限
 // ---------------- 二进制分包 ----------------
 inline constexpr size_t   MAX_PACKET_UNCOMPRESSED_SIZE = 65535;  // Uncompressed Len 字段上限
 inline constexpr size_t   MAX_PACKET_COMPRESSED_SIZE   = 65535;  // Compressed Len 字段上限
+inline constexpr size_t   MAX_MQTT_CHUNK_BYTES          = 65599;  // IJCH envelope + max payload
 inline constexpr uint64_t MAX_JOB_BYTES                = 64ull * 1024 * 1024;  // 64 MiB
 inline constexpr uint32_t MAX_TOTAL_PACKETS            = 65535;  // Packet Index 16 位上限
 

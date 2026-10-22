@@ -108,7 +108,7 @@ int main() {
 
     // ---- 3. commands 元数据与 schema 同源 ----
     CHECK_EQ(count_of(out, "\"cmd\":\""), 6u);
-    CHECK_EQ(count_of(out, "\"key\":\""), 14u);  // 10(start_print含channel_order)+1(cancel)+1(feed)
+    CHECK_EQ(count_of(out, "\"key\":\""), 15u);  // start_print增加transport
     CHECK_TRUE(near_after(out, "\"cmd\":\"cut_paper\"", "\"supported\":false"));
     CHECK_TRUE(near_after(out, "\"cmd\":\"feed_paper\"", "\"supported\":true"));
     CHECK_TRUE(near_after(out, "\"cmd\":\"start_print\"", "\"supported\":true"));

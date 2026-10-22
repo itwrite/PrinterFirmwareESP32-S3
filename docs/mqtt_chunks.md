@@ -23,7 +23,8 @@ job_id bytes
 payload bytes
 ```
 
-The current firmware validates this envelope in the platform-independent core,
-including job ID characters, bounds, index and CRC. It does not yet feed chunks
-into an active job; a future stage will bind the envelope to a job created by a
-JSON command and reuse the IJPD decoder backend.
+The firmware validates this envelope in the platform-independent core, including
+job ID characters, bounds, index and CRC. A job created with
+`start_print.transport="mqtt"` routes accepted payloads into the existing IJPD
+frame parser; the payload must therefore contain the normal 12-byte IJPD Hello
+followed by the existing binary frames, split at arbitrary MQTT chunk boundaries.

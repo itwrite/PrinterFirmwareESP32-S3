@@ -47,6 +47,21 @@ PrintService& PrintService::instance() noexcept {
     return s;
 }
 
+void PrintService::set_mqtt_context(const char* base_topic, const char* device_id) noexcept {
+    if (base_topic == nullptr) {
+        mqtt_base_topic_[0] = '\0';
+    } else {
+        strncpy(mqtt_base_topic_, base_topic, sizeof(mqtt_base_topic_) - 1);
+        mqtt_base_topic_[sizeof(mqtt_base_topic_) - 1] = '\0';
+    }
+    if (device_id == nullptr) {
+        mqtt_device_id_[0] = '\0';
+    } else {
+        strncpy(mqtt_device_id_, device_id, sizeof(mqtt_device_id_) - 1);
+        mqtt_device_id_[sizeof(mqtt_device_id_) - 1] = '\0';
+    }
+}
+
 void PrintService::mock_delay(void*, uint32_t ms) noexcept {
     vTaskDelay(pdMS_TO_TICKS(ms));
 }
@@ -237,6 +252,10 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     if (!self->mem_->psram_available) {
         return Err::PSRAM_UNAVAILABLE;
     }
+    if (p.transport == StartPrintTransport::Mqtt &&
+        self->mqtt_base_topic_[0] == '\0') {
+        return Err::UNSUPPORTED;
+    }
 
     // 任务参数 -> pipeline 配置
     PrintPipeline::Config cfg;
@@ -247,6 +266,9 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     esp_fill_random(&cfg.data_token, sizeof(cfg.data_token));
     self->data_token_ = cfg.data_token;
     self->token_used_ = false;
+    self->mqtt_transport_ = p.transport == StartPrintTransport::Mqtt;
+    self->mqtt_next_chunk_ = 0;
+    self->mqtt_total_chunks_ = 0;
     self->cutter_after_finish_ = p.cutter_after_finish;
     cfg.total_packets = p.total_packets;
     cfg.total_bytes_uncompressed = p.total_bytes_uncompressed;
@@ -298,7 +320,7 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
         self->buf_pkts_ = 0;
         self->buf_started_ms_ = task_layout::now_ms();
         self->buf_receiving_ = true;
-        self->buf_printing_ = false;
+        self->buf_printing_ = self->mqtt_transport_;
         self->buf_cancel_ = false;
         if (self->bfp_rx_.begin_job(self->buf_cfg_) != Err::OK ||
             self->bfp_rx_.set_payload_buffer(self->mem_->comp[0],
@@ -344,8 +366,19 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     // 响应（协议 §4.3）
     if (!w.begin_object()) return Err::INTERNAL_ERROR;
     if (!w.kv_cstr("job_id", p.job_id)) return Err::INTERNAL_ERROR;
-    if (!w.kv_cstr("status", "waiting_data_conn")) return Err::INTERNAL_ERROR;
-    if (!w.kv_i64("data_port", cfg::DATA_TCP_PORT)) return Err::INTERNAL_ERROR;
+    if (!w.kv_cstr("status", self->mqtt_transport_ ? "waiting_mqtt_chunks"
+                                                     : "waiting_data_conn")) {
+        return Err::INTERNAL_ERROR;
+    }
+    if (self->mqtt_transport_) {
+        char topic[192] = {};
+        const int n = snprintf(topic, sizeof(topic), "%s/%s/job/%s/chunk",
+                               self->mqtt_base_topic_, self->mqtt_device_id_, self->job_id_);
+        if (n <= 0 || static_cast<size_t>(n) >= sizeof(topic) ||
+            !w.kv_cstr("mqtt_chunk_topic", topic)) return Err::INTERNAL_ERROR;
+    } else if (!w.kv_i64("data_port", cfg::DATA_TCP_PORT)) {
+        return Err::INTERNAL_ERROR;
+    }
     if (!w.kv_i64("data_token", static_cast<int64_t>(self->data_token_))) {
         return Err::INTERNAL_ERROR;
     }
@@ -400,6 +433,61 @@ bool PrintService::raw_accept(void* user, int fd, const char* peer) noexcept {
     }
     IJPD_LOGI(kTag, "raw escpos conn accepted from %s", peer);
     return true;
+}
+
+void PrintService::mqtt_chunk(void* user, const uint8_t* data, size_t len) noexcept {
+    auto* self = static_cast<PrintService*>(user);
+    self->accept_mqtt_chunk_(data, len);
+}
+
+void PrintService::fail_mqtt_job_(Err code) noexcept {
+    if (buffered_) {
+        finish_buffered_(PrintPipeline::Event::Kind::Failed, code);
+    } else if (mqtt_transport_) {
+        pipeline_.fail(code);
+        mqtt_transport_ = false;
+    }
+}
+
+void PrintService::accept_mqtt_chunk_(const uint8_t* data, size_t len) noexcept {
+    if (!mqtt_transport_ || (!buffered_ && !pipeline_.active())) return;
+    MqttChunkView view{};
+    const Err parsed = parse_mqtt_chunk(data, len, &view);
+    if (parsed != Err::OK || view.job_id_len != std::strlen(job_id_) ||
+        std::memcmp(view.job_id, job_id_, view.job_id_len) != 0) {
+        fail_mqtt_job_(parsed == Err::OK ? Err::INVALID_ARGUMENT : parsed);
+        return;
+    }
+    last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
+    if (mqtt_total_chunks_ == 0) mqtt_total_chunks_ = view.total_chunks;
+    if (view.total_chunks != mqtt_total_chunks_ || view.chunk_index != mqtt_next_chunk_) {
+        fail_mqtt_job_(Err::PACKET_OUT_OF_ORDER);
+        return;
+    }
+
+    size_t offset = 0;
+    while (offset < view.payload_len) {
+        if (buffered_) {
+            BinFrameParser::Events events{this, bfp_hello_cb_, bfp_frame_cb_};
+            bfp_rx_.set_payload_buffer(mem_->comp[0], cfg::MAX_PACKET_COMPRESSED_SIZE + 1);
+            const auto result = bfp_rx_.feed(view.payload + offset,
+                                              view.payload_len - offset, events);
+            offset += result.consumed;
+            if (result.status == BinFrameParser::FeedStatus::Failed) {
+                fail_mqtt_job_(result.error);
+                return;
+            }
+            if (result.status == BinFrameParser::FeedStatus::NeedBuffer) continue;
+            break;
+        }
+        size_t consumed = 0;
+        const auto result = pipeline_.rx_pump(view.payload + offset,
+                                               view.payload_len - offset, &consumed);
+        offset += consumed;
+        if (result == PrintPipeline::Pump::Failed) return;
+        if (result == PrintPipeline::Pump::WouldBlock) return;
+    }
+    ++mqtt_next_chunk_;
 }
 
 void PrintService::close_raw_socket_() noexcept {
