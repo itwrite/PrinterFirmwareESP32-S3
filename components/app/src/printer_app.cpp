@@ -166,10 +166,6 @@ Err PrinterApp::start() noexcept {
         IJPD_LOGW(kTag, "escpos raw disabled: profile does not support escpos");
         config_.services.escpos_raw_tcp = false;
     }
-    if (config_.services.airprint) {
-        IJPD_LOGW(kTag, "airprint adapter is not enabled in this build");
-        config_.services.airprint = false;
-    }
 
     di_ = DeviceInfo{};
     di_.device_id = device_id_;
@@ -287,6 +283,14 @@ Err PrinterApp::start() noexcept {
             return e;
         }
         plane_.set_sink(ControlPlane::kChannelMqtt, {this, mqtt_send});
+    }
+
+    if (config_.services.airprint) {
+        e = ipp_.start(config_.airprint_port, config_.device_model, config_.profile);
+        if (e != Err::OK) {
+            IJPD_LOGE(kTag, "IPP foundation start failed: %s", err_name(e));
+            return e;
+        }
     }
 
     if (!config_.services.ijpd_tcp &&

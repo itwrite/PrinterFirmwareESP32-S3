@@ -22,6 +22,7 @@
 #include "platform_esp/data_tcp_server.h"
 #include "platform_esp/raw_tcp_server.h"
 #include "platform_esp/mqtt_adapter.h"
+#include "platform_esp/ipp_server.h"
 #include "platform_esp/psram_allocator.h"
 #include "platform_esp/wifi_manager.h"
 
@@ -77,6 +78,7 @@ private:
     DataTcpServer data_tcp_;
     RawTcpServer raw_tcp_;
     MqttAdapter mqtt_;
+    IppServer ipp_;
     BleControlServer ble_;
 
     DeviceInfo di_{};
