@@ -13,6 +13,7 @@ idf_component_register(
          "src/lz4_block.cpp"
          "src/mqtt_chunk_protocol.cpp"
          "src/print_pipeline.cpp"
+         "src/pwg_raster.cpp"
          "src/slot_pool.cpp"
          "src/stats.cpp"
     INCLUDE_DIRS "include" "../../profiles"

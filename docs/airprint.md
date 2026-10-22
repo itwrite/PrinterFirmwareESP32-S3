@@ -16,5 +16,10 @@ Current behavior:
 - `_ipp._tcp` mDNS advertisement is intentionally not enabled yet.
 - PDF, PWG Raster and Apple Raster parsing are not implemented yet.
 
+The core now validates a PWG Raster v2 (`RaS2`) 1796-byte page header and row
+layout, including dimensions, DPI, bit depth, bytes-per-line and compression.
+This parser is not yet connected to HTTP `Print-Job`; document upload remains
+disabled until the bounded page backend is connected to the shared raster job.
+
 The device must not advertise itself as AirPrint-ready until `Print-Job` and at
 least one bounded document format are connected to the shared raster backend.

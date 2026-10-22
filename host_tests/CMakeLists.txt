@@ -47,6 +47,7 @@ add_library(ijpd_core STATIC
     ${CORE_DIR}/src/json_lite.cpp
      ${CORE_DIR}/src/lz4_block.cpp
      ${CORE_DIR}/src/mqtt_chunk_protocol.cpp
+     ${CORE_DIR}/src/pwg_raster.cpp
      ${CORE_DIR}/src/print_pipeline.cpp
     ${CORE_DIR}/src/slot_pool.cpp
     ${CORE_DIR}/src/stats.cpp
@@ -90,6 +91,7 @@ ijpd_add_app_test(test_control_plane)
 ijpd_add_test(test_lz4_block)
 ijpd_add_test(test_bin_frame_parser)
 ijpd_add_test(test_mqtt_chunk_protocol)
+ijpd_add_test(test_pwg_raster)
 ijpd_add_test(test_slot_pool)
 ijpd_add_test(test_flow_control)
 ijpd_add_test(test_job_state_machine)
