@@ -99,6 +99,19 @@ void PrinterApp::tick_services_() noexcept {
             mdns_started_ = true;
         }
     }
+    if (!mdns_ipp_started_ && config_.services.airprint && ipp_.started() &&
+        wifi_.connected()) {
+        char lower[9] = {0};
+        for (int i = 0; i < 6 && device_id_[5 + i]; ++i) {
+            lower[i] = static_cast<char>(tolower(device_id_[5 + i]));
+        }
+        char hostname[24];
+        snprintf(hostname, sizeof(hostname), "ijpd-%s", lower);
+        if (mdns_broadcast_ipp_start(hostname, device_id_, config_.device_model,
+                                     config_.airprint_port, config_.profile) == Err::OK) {
+            mdns_ipp_started_ = true;
+        }
+    }
 }
 
 void PrinterApp::tcp_channel_closed(void* user, int ch) noexcept {

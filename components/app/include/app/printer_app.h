@@ -84,6 +84,7 @@ private:
     DeviceInfo di_{};
     char device_id_[16] = {0};
     bool mdns_started_ = false;  // Wi-Fi 就绪后惰性启动(tcp_tick 重试)
+    bool mdns_ipp_started_ = false;
     volatile bool service_tick_running_ = false;
 };
 

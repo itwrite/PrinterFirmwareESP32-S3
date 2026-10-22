@@ -48,7 +48,7 @@ checkboxes and the next-stage section whenever a stage is completed.
 
 ## Following Stage: AirPrint Foundation
 
-- [ ] Add optional `_ipp._tcp` mDNS advertisement, disabled by default.
+- [x] Add optional `_ipp._tcp` mDNS advertisement, disabled by default.
 - [x] Add `esp_http_server` listener on the configured IPP port (default 631).
 - [x] Implement a minimal `Get-Printer-Attributes` response with Profile model data.
 - [x] Implement bounded single-page PWG Raster `Print-Job` for Mono1 profiles.

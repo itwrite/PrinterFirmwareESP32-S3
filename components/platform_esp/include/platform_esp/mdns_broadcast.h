@@ -10,6 +10,7 @@
 #include <cstdint>
 
 #include "core/errors.h"
+#include "core/print_profile.h"
 
 namespace ijpd {
 
@@ -17,6 +18,11 @@ namespace ijpd {
 // hostname/device_id/fw 均为 NUL 结尾字符串;重复调用安全(仅首次生效)。
 Err mdns_broadcast_start(const char* hostname, const char* device_id,
                          const char* fw_version) noexcept;
+
+// 广播受限 AirPrint/IPP 服务。调用方仅应在 Print-Job 至少支持一个格式时调用。
+Err mdns_broadcast_ipp_start(const char* hostname, const char* device_id,
+                             const char* model, uint16_t port,
+                             const PrintProfile* profile) noexcept;
 
 }  // namespace ijpd
 
