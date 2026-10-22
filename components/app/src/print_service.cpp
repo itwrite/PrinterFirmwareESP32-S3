@@ -319,7 +319,7 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     os.print_row = os_print_row;
     os.on_event = os_on_event;
 
-    PrintheadConfig ph{p.bytes_per_row, 1000, 0};  // Mock: 1000 行/秒(加快演示)
+    PrintheadConfig ph{p.bytes_per_row, 2000, 0};  // Mock: 2000 行/秒
     (void)self->printhead_.begin(ph);
 
     if (!self->buffered_) {
@@ -625,8 +625,11 @@ void PrintService::request_close_data_() noexcept { close_req_ = true; }
 void PrintService::check_timeouts_(uint64_t now) noexcept {
     if (buffered_ && (buf_receiving_ || buf_printing_)) {
         const uint64_t started = buf_started_ms_;
-        if (buf_receiving_ &&
-            now - last_rx_ms_ >= cfg::PACKET_IDLE_TIMEOUT_MS) {
+        // 多核读序:last_rx 可能被 rx 任务(另一核)更新到比 now 更晚。
+        // 先读 last_rx 再取 now,now < last 视为"刚收到"跳过(不下溢)。
+        const uint32_t last = last_rx_ms_;
+        if (buf_receiving_ && now >= last &&
+            now - last >= cfg::PACKET_IDLE_TIMEOUT_MS) {
             IJPD_LOGW(kTag, "buffered rx idle timeout: now=%llu last_rx=%u "
                       "diff=%llu idle_ms=%u started=%llu",
                       static_cast<unsigned long long>(now),

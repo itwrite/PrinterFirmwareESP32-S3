@@ -204,12 +204,9 @@ void DisplayService::end_job() noexcept {
 // ---- 渲染 ----
 
 void DisplayService::render_frame_() noexcept {
+    // 预览渲染:不持长锁(锁会阻塞 rx_task 的 feed_row,导致 TCP 背压)
+    // 偶尔读到半写行对预览无视觉影响;数据完整性由 CRC 保证
     if (!impl_ || !impl_->page || !impl_->job_active) return;
-    if (impl_->page_lock) xSemaphoreTake(impl_->page_lock, portMAX_DELAY);
-    if (!impl_->page || !impl_->job_active) {
-        if (impl_->page_lock) xSemaphoreGive(impl_->page_lock);
-        return;
-    }
     const uint32_t w = impl_->w_px, h = impl_->h_px;
     const uint32_t npl = impl_->planes > 4 ? 4 : impl_->planes;
     const uint32_t capb = impl_->cap_bpr;
@@ -299,7 +296,8 @@ void DisplayService::flush_task_(void* arg) noexcept {
                 esp_lcd_panel_draw_bitmap(self->impl_->panel, 0, 0, kLcdW, kLcdH, self->impl_->fb);
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(kFlushPeriodMs));
+        const uint32_t period = self->impl_->job_active ? 500 : kFlushPeriodMs;
+        vTaskDelay(pdMS_TO_TICKS(period));
     }
 }
 
