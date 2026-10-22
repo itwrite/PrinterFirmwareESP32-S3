@@ -25,8 +25,8 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [ ] RAW TCP is only a byte-stream ingress until a real thermal `submitRaw()` HAL is supplied.
 - [ ] BLE is custom IJPD GATT, not Bluetooth Classic SPP.
 - [ ] MQTT adapter is not enabled by the default firmware variant.
-- [ ] AirPrint IPP/HTTP service and document parsing are not implemented.
-- [ ] PDF/PWG Raster/Apple Raster conversion is not implemented on-device.
+- [ ] AirPrint is limited to the configured Mono1 PWG Raster subset; PDF/color/Apple Raster remain unsupported.
+- [ ] PDF and Apple Raster conversion are not implemented on-device.
 - [ ] Real printhead, stepper, cutter and sensor HALs remain hardware-specific.
 
 ## Next Stage: MQTT Control Adapter
@@ -56,7 +56,7 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [x] Select and document the first supported document format: PWG Raster v2 header/row layout.
 - [x] Add a bounded platform-independent PWG Raster v2 header parser and host tests.
 - [x] Add a bounded document upload path and translate accepted pages into the raster job backend.
-- [ ] Do not advertise AirPrint until `Print-Job` and at least one document format are functional.
+- [x] Advertise restricted `_ipp._tcp` only when the configured Mono1 PWG Raster Print-Job path is enabled.
 
 ## Protocol and HAL Follow-up
 

@@ -17,14 +17,15 @@ Current behavior:
 - `Validate-Job` accepts only the explicitly supported placeholder format
   `application/octet-stream`; all real document formats are rejected until a
   document parser is installed.
-- `_ipp._tcp` mDNS advertisement is intentionally not enabled yet.
-- PDF, PWG Raster and Apple Raster parsing are not implemented yet.
+- `_ipp._tcp` mDNS advertisement is enabled only when the AirPrint service flag
+  is enabled and the configured Profile is Mono1 Raster.
+- PDF and Apple Raster parsing are not implemented yet.
 
 The core now validates a PWG Raster v2 (`RaS2`) 1796-byte page header and row
 layout, including dimensions, DPI, bit depth, bytes-per-line and compression.
 This parser is not yet connected to HTTP `Print-Job`; document upload remains
 disabled until the bounded page backend is connected to the shared raster job.
 
-The device must not advertise itself as AirPrint-ready until `_ipp._tcp`
-advertising and full client compatibility are verified. The current Print-Job
-implementation is intentionally a restricted PWG Raster subset.
+The current Print-Job implementation is intentionally a restricted PWG Raster
+subset. The default firmware configuration keeps AirPrint disabled until a
+real iOS/macOS discovery and print regression has been completed.
