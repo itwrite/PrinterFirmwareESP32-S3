@@ -80,8 +80,7 @@ Err DisplayService::start() noexcept {
     if (started_) return Err::OK;
     build_srgb_lut();
     impl_ = new Impl();
-    impl_->page_lock = xSemaphoreCreateMutex();
-    if (!impl_->page_lock) return Err::OUT_OF_MEMORY;
+    // page_lock 已移除:多核互斥锁引发 FreeRTOS 断言,无锁方案替代
 
     gpio_config_t bl = {};
     bl.pin_bit_mask = 1ULL << kPinBl;
@@ -184,10 +183,12 @@ void DisplayService::feed_row(uint32_t idx, const uint8_t* data, size_t len) noe
     if (idx >= impl_->total_rows) return;
     size_t off = size_t(idx) * impl_->cap_bpr;
     size_t n = len < impl_->bpr ? len : impl_->bpr;
-    if (impl_->page_lock) xSemaphoreTake(impl_->page_lock, portMAX_DELAY);
+    // 无锁写:310B memcpy 亚微秒;rows_seen 32位对齐原子写。
+    // FreeRTOS 互斥锁跨核使用时优先级继承簿记可触发
+    // xTaskPriorityDisinherit 断言 → 整机崩溃(实测复现),不可接受。
+    // 撕裂读对预览显示无视觉影响,数据完整性由逐包 CRC 保证。
     std::memcpy(impl_->page + off, data, n);
     impl_->rows_seen = idx + 1;
-    if (impl_->page_lock) xSemaphoreGive(impl_->page_lock);
 }
 
 const uint8_t* DisplayService::peek_row(uint32_t idx) const noexcept {
@@ -284,7 +285,6 @@ void DisplayService::render_frame_() noexcept {
             line[sx] = color;
         }
     }
-    if (impl_->page_lock) xSemaphoreGive(impl_->page_lock);
 }
 
 void DisplayService::flush_task_(void* arg) noexcept {
