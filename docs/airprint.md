@@ -10,6 +10,9 @@ Current behavior:
   bounded binary IPP response containing the printer name/model, URI, state and
   supported IPP version.
 - `Print-Job` and other operations are rejected with a standard IPP error.
+- `Validate-Job` accepts only the explicitly supported placeholder format
+  `application/octet-stream`; all real document formats are rejected until a
+  document parser is installed.
 - `_ipp._tcp` mDNS advertisement is intentionally not enabled yet.
 - PDF, PWG Raster and Apple Raster parsing are not implemented yet.
 

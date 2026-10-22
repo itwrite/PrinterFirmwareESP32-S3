@@ -240,7 +240,9 @@ void MqttAdapter::on_event_(int32_t event_id, void* event_data) noexcept {
         if (message_is_chunk_) {
             if (message_discard_ || chunk_slot_ < 0 ||
                 chunk_len_ + static_cast<size_t>(event->data_len) > cfg::MAX_MQTT_CHUNK_BYTES) {
-                if (event->current_data_offset + event->data_len >= event->total_data_len &&
+                if (static_cast<size_t>(event->current_data_offset) +
+                        static_cast<size_t>(event->data_len) >=
+                            static_cast<size_t>(event->total_data_len) &&
                     chunk_slot_ >= 0) {
                     chunk_free_mask_.fetch_or(static_cast<uint8_t>(1u << chunk_slot_),
                                               std::memory_order_release);

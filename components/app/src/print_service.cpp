@@ -827,6 +827,18 @@ void PrintService::check_timeouts_(uint64_t now) noexcept {
         }
         return;
     }
+    if (mqtt_transport_ && !buffered_) {
+        if (pipeline_.terminal()) return;
+        const uint32_t last = last_rx_ms_;
+        if (now >= last && now - last >= cfg::PACKET_IDLE_TIMEOUT_MS) {
+            pipeline_.fail(Err::JOB_TIMEOUT);
+            mqtt_transport_ = false;
+        } else if (now - pipeline_.started_ms() >= cfg::JOB_TOTAL_TIMEOUT_MS) {
+            pipeline_.fail(Err::JOB_TIMEOUT);
+            mqtt_transport_ = false;
+        }
+        return;
+    }
     if (buffered_ && (buf_receiving_ || buf_printing_)) {
         const uint64_t started = buf_started_ms_;
         // 多核读序:last_rx 可能被 rx 任务(另一核)更新到比 now 更晚。

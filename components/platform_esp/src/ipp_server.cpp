@@ -13,6 +13,7 @@ constexpr const char* kTag = "ipp";
 constexpr uint16_t kIppVersionMajor = 2;
 constexpr uint16_t kIppVersionMinor = 0;
 constexpr uint16_t kOpGetPrinterAttributes = 0x000B;
+constexpr uint16_t kOpValidateJob = 0x0004;
 constexpr uint16_t kStatusOk = 0x0000;
 constexpr uint16_t kStatusOperationUnsupported = 0x0501;
 constexpr uint16_t kStatusDocumentFormatUnsupported = 0x040D;
@@ -42,6 +43,14 @@ void put_u32(uint8_t* p, uint32_t v) {
 
 uint16_t get_u16(const uint8_t* p) {
     return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | p[1]);
+}
+
+bool contains_format(const uint8_t* data, size_t len, const char* format) {
+    const size_t format_len = std::strlen(format);
+    for (size_t i = 8; i + format_len <= len; ++i) {
+        if (std::memcmp(data + i, format, format_len) == 0) return true;
+    }
+    return false;
 }
 
 bool append_bytes(uint8_t* out, size_t cap, size_t* len, const void* data, size_t n) {
@@ -143,8 +152,15 @@ esp_err_t IppServer::handle_(httpd_req_t* req) noexcept {
     uint8_t response[2048] = {};
     size_t len = 0;
     put_u16(response + len, kIppVersionMajor); len += 2;
-    put_u16(response + len, operation == kOpGetPrinterAttributes
-                               ? kStatusOk : kStatusOperationUnsupported); len += 2;
+    const bool supported_validation = operation == kOpGetPrinterAttributes ||
+                                      operation == kOpValidateJob;
+    const bool validate_ok = operation == kOpValidateJob &&
+                             contains_format(input, received, "application/octet-stream");
+    put_u16(response + len, operation == kOpGetPrinterAttributes || validate_ok
+                               ? kStatusOk
+                               : (supported_validation ? kStatusDocumentFormatUnsupported
+                                                        : kStatusOperationUnsupported));
+    len += 2;
     put_u32(response + len, request_id); len += 4;
 
     if (operation == kOpGetPrinterAttributes) {
@@ -188,7 +204,11 @@ esp_err_t IppServer::handle_(httpd_req_t* req) noexcept {
         // This foundation deliberately rejects Print-Job until a document
         // parser and bounded raster backend are installed.
         put_u16(response + 2, operation == 0x0002 ? kStatusDocumentFormatUnsupported
-                                                  : kStatusOperationUnsupported);
+                                                  : (operation == kOpValidateJob && validate_ok
+                                                         ? kStatusOk
+                                                         : (supported_validation
+                                                                ? kStatusDocumentFormatUnsupported
+                                                                : kStatusOperationUnsupported)));
     }
     return httpd_resp_send(req, reinterpret_cast<const char*>(response), len);
 }
