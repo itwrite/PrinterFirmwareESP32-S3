@@ -98,7 +98,7 @@ Err WifiManager::start() noexcept {
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiManager::event_handler, this, nullptr));
 
-    // ---- 配网逻辑：有凭据则直连，无则开 SoftAP 门户 ----
+    // ---- 配网逻辑：有凭据则直连，无则开 SoftAP 配网门户 ----
     if (ProvisioningPortal::has_saved_credentials()) {
         IJPD_LOGI(kTag, "has saved credentials, trying STA...");
         if (ProvisioningPortal::try_connect_saved()) {
@@ -125,6 +125,32 @@ Err WifiManager::start() noexcept {
 
     IJPD_LOGI(kTag, "provisioning portal active (connect to IJPD-Setup-XXXX)");
     return Err::OK;  // 配网模式不算失败
+}
+
+Err WifiManager::request_provisioning() noexcept {
+    if (portal_active_ || provisioning_requested_) return Err::OK;
+    provisioning_requested_ = true;
+    return Err::OK;
+}
+
+void WifiManager::process_pending_requests() noexcept {
+    if (!provisioning_requested_) return;
+    provisioning_requested_ = false;
+    if (portal_active_) return;
+    if (portal_ == nullptr) portal_ = new ProvisioningPortal();
+
+    portal_active_ = true;
+    connected_ = false;
+    esp_timer_stop(retry_timer_);
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    const Err result = portal_->start_on_demand();
+    if (result != Err::OK) {
+        portal_active_ = false;
+        IJPD_LOGE(kTag, "on-demand provisioning start failed: %s", err_name(result));
+        return;
+    }
+    IJPD_LOGI(kTag, "on-demand provisioning portal active");
 }
 
 void WifiManager::stop_portal_if_connected() noexcept {

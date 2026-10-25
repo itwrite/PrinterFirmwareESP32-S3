@@ -481,6 +481,15 @@ Err CommandRouter::dispatch(const CommandSpec& spec, const Envelope& env,
         return emit_success(resp, resp_cap, resp_len, env.msg_id, env.msg_id_len,
                             env.cmd, env.cmd_len, hooks_.get_print_status, hooks_.user);
     }
+    if (cmd_is(spec, "start_provisioning")) {
+        if (hooks_.start_provisioning == nullptr) {
+            set_msg_raw("handler not installed");
+            return emit_error(resp, resp_cap, resp_len, env.msg_id, env.msg_id_len,
+                              env.cmd, env.cmd_len, Err::INTERNAL_ERROR, err_msg_);
+        }
+        return emit_success(resp, resp_cap, resp_len, env.msg_id, env.msg_id_len,
+                            env.cmd, env.cmd_len, hooks_.start_provisioning, hooks_.user);
+    }
     if (cmd_is(spec, "cut_paper")) {
         if (!caps_.cutter_supported) {
             set_msg_raw("cutter is not available on this device");

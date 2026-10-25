@@ -42,7 +42,6 @@ struct DeviceInfo {
     bool cap_mock_print;
     PrinterServices services{};
     uint16_t escpos_raw_tcp_port = 0;
-    uint16_t airprint_port = 0;
 
     // Profile（中间件：打印机类型描述；null 时 fallback 到默认喷墨）
     const PrintProfile* profile = nullptr;

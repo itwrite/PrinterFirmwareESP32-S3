@@ -13,7 +13,6 @@
 #include "core/lz4_block.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 
@@ -46,6 +45,19 @@ const char* status_text(const PrintPipeline::Event& ev) {
 PrintService& PrintService::instance() noexcept {
     static PrintService s;
     return s;
+}
+
+bool PrintService::has_active_job() const noexcept {
+    return pipeline_.active() || buffered_ || raw_active_ || data_fd_ >= 0 || raw_fd_ >= 0 ||
+           close_req_ || raw_close_req_;
+}
+
+void PrintService::set_hal_bundle(const PrinterHalBundle& bundle) noexcept {
+    if (running_ || pipeline_.active() || buffered_ || raw_active_) return;
+    printhead_hal_ = bundle.printhead != nullptr ? bundle.printhead : &printhead_;
+    stepper_hal_ = bundle.stepper != nullptr ? bundle.stepper : &stepper_;
+    cutter_hal_ = bundle.cutter != nullptr ? bundle.cutter : &cutter_;
+    sensors_hal_ = bundle.sensors != nullptr ? bundle.sensors : &sensors_;
 }
 
 void PrintService::set_mqtt_context(const char* base_topic, const char* device_id) noexcept {
@@ -81,7 +93,7 @@ Err PrintService::os_print_row(void* user, const uint8_t* row, size_t len,
     DisplayService::instance().feed_row(row_index, row, len);
     self->last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
     RasterMeta m{row_index};
-    return self->printhead_.submitRaster(row, len, m);
+    return self->printhead_hal_->submitRaster(row, len, m);
 }
 
 // ---------------------------------------------------------------- 事件
@@ -210,8 +222,6 @@ Err PrintService::start(PlatformMemory* mem, ControlPlane* plane) noexcept {
 
     event_queue_ = xQueueCreate(kEventQueueDepth, sizeof(EventItem));
     if (event_queue_ == nullptr) return Err::OUT_OF_MEMORY;
-    ipp_done_sem_ = xSemaphoreCreateBinary();
-    if (ipp_done_sem_ == nullptr) return Err::OUT_OF_MEMORY;
 
     running_ = true;
     Err e = task_layout::spawn("rx", rx_task_, this, 0, task_layout::kPrioRx,
@@ -233,8 +243,8 @@ Err PrintService::start(PlatformMemory* mem, ControlPlane* plane) noexcept {
         return e;
     }
 
-    (void)stepper_.begin();
-    (void)printhead_.begin(PrintheadConfig{0, 200, 0});  // 由 start_print 重新 begin
+    (void)stepper_hal_->begin();
+    (void)printhead_hal_->begin(PrintheadConfig{0, 200, 0});  // 由 start_print 重新 begin
     IJPD_LOGI(kTag, "print service started (mock hal)");
     return Err::OK;
 }
@@ -244,7 +254,7 @@ Err PrintService::start(PlatformMemory* mem, ControlPlane* plane) noexcept {
 Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
                                    JsonWriter& w) noexcept {
     auto* self = static_cast<PrintService*>(user);
-    if (self->pipeline_.active() || self->raw_active_ || self->ipp_active_) {
+    if (self->pipeline_.active() || self->raw_active_) {
         return Err::JOB_ALREADY_RUNNING;
     }
     // 上一任务已终态但数据 socket 清理尚未完成(rx_task 异步执行):
@@ -295,16 +305,35 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
 
     // 页缓存直通判定:整页可放入常驻显示页缓存(与显示共享同一块 PSRAM)
     // → 接收全速、打印定速、边收边显,绕开槽池背压。
-    const uint32_t d_bits = p.pixel_bits == 8 ? 8 : 1;
-    const uint32_t d_planes = p.image_planes == 0 ? 1 : p.image_planes;
+    const bool cmyk8_interleaved =
+        self->profile_ != nullptr && self->profile_->pixel_format == PixelFormat::CMYK8 &&
+        p.bytes_per_row == static_cast<uint32_t>(self->profile_->print_width_px) * 4;
+    const uint32_t d_bits = cmyk8_interleaved ? 8 : (p.pixel_bits == 8 ? 8 : 1);
+    const uint32_t d_planes = cmyk8_interleaved ? 4 : (p.image_planes == 0 ? 1 : p.image_planes);
+    const uint32_t d_width = cmyk8_interleaved
+                                 ? self->profile_->print_width_px
+                                 : p.bytes_per_row * 8 / d_bits;
+    RasterChannel cmyk_order[4] = {RasterChannel::Cyan, RasterChannel::Magenta,
+                                   RasterChannel::Yellow, RasterChannel::Black};
+    const RasterChannel* display_order = cmyk8_interleaved
+                                             ? cmyk_order
+                                             : p.channel_order;
+    const uint32_t display_order_count = cmyk8_interleaved ? 4 : p.channel_order_count;
+    const uint32_t display_bpp = cmyk8_interleaved ? 4 : 1;
+    const uint32_t display_width_um = cmyk8_interleaved ? self->profile_->print_width_um : 0;
+    const uint32_t display_dpi = self->profile_ != nullptr ? self->profile_->dpi : 0;
+    const uint32_t display_rows = cmyk8_interleaved
+                                      ? p.total_rows
+                                      : p.total_rows / d_planes;
     const bool fits_page =
         d_planes <= 4 && p.bytes_per_row <= 384 &&
-        p.total_rows / d_planes <= 4000 && p.total_rows % d_planes == 0;
+        display_rows <= 4000 && (cmyk8_interleaved || p.total_rows % d_planes == 0);
     self->buffered_ =
         fits_page && DisplayService::instance().begin_job(
-                          p.bytes_per_row * 8 / d_bits, p.total_rows / d_planes,
-                          d_bits, d_planes, p.bytes_per_row,
-                          p.channel_order, p.channel_order_count) == Err::OK;
+                          d_width, display_rows, d_bits, d_planes,
+                          p.bytes_per_row, display_order, display_order_count,
+                          cmyk8_interleaved, display_bpp, display_width_um,
+                          display_dpi) == Err::OK;
     if (self->buffered_) {
         // 直通模式:不走槽池流水线,本地帧解析 + 页缓存
         self->buf_cfg_ = BinFrameParser::JobConfig{};
@@ -348,15 +377,15 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     os.on_event = os_on_event;
 
     PrintheadConfig ph{p.bytes_per_row, 2000, 0};  // Mock: 2000 行/秒
-    (void)self->printhead_.begin(ph);
+    (void)self->printhead_hal_->begin(ph);
 
     if (!self->buffered_) {
         // 还原显示(旧路径):像素宽 = 每行字节数×8/位深;像素高 = 总行数/平面数
-        if (p.bytes_per_row > 0 && p.total_rows >= d_planes &&
-            p.total_rows % d_planes == 0) {
+        if (p.bytes_per_row > 0 && display_rows > 0) {
             (void)DisplayService::instance().begin_job(
-                p.bytes_per_row * 8 / d_bits, p.total_rows / d_planes, d_bits,
-                d_planes, p.bytes_per_row, p.channel_order, p.channel_order_count);
+                d_width, display_rows, d_bits, d_planes, p.bytes_per_row,
+                display_order, display_order_count, cmyk8_interleaved, display_bpp,
+                display_width_um, display_dpi);
         }
     }
 
@@ -433,7 +462,7 @@ bool PrintService::raw_accept(void* user, int fd, const char* peer) noexcept {
     self->job_id_[sizeof(self->job_id_) - 1] = '\0';
 
     const PrintheadConfig ph{0, 1, 0, 512};
-    if (self->printhead_.begin(ph) != Err::OK) {
+    if (self->printhead_hal_->begin(ph) != Err::OK) {
         self->raw_active_ = false;
         self->raw_fd_ = -1;
         return false;
@@ -450,86 +479,6 @@ void PrintService::mqtt_chunk(void* user, const uint8_t* data, size_t len) noexc
 void PrintService::mqtt_disconnected(void* user) noexcept {
     auto* self = static_cast<PrintService*>(user);
     if (self->mqtt_transport_) self->fail_mqtt_job_(Err::DATA_CONNECTION_LOST);
-}
-
-Err PrintService::ipp_begin_page(void* user, const PwgRasterPage& page) noexcept {
-    auto* self = static_cast<PrintService*>(user);
-    if (!self->mem_->psram_available || self->pipeline_.active() ||
-        self->buffered_ || self->raw_active_ || self->data_fd_ >= 0 ||
-        self->ipp_active_) return Err::JOB_ALREADY_RUNNING;
-    if (page.bits_per_pixel != 1 || page.bits_per_color != 1 ||
-        page.bytes_per_line == 0 || page.total_bytes == 0) {
-        return Err::UNSUPPORTED;
-    }
-    const RasterChannel black = RasterChannel::Black;
-    const Err display = DisplayService::instance().begin_job(
-        page.width, page.height, 1, 1, page.bytes_per_line, &black, 1);
-    if (display != Err::OK) return display;
-    if (xSemaphoreTake(static_cast<SemaphoreHandle_t>(self->ipp_done_sem_), 0) == pdTRUE) {
-        // Drain an old terminal notification before starting the next page.
-    }
-    snprintf(self->job_id_, sizeof(self->job_id_), "ipp-%llu",
-             static_cast<unsigned long long>(task_layout::now_ms()));
-    self->buf_cfg_ = BinFrameParser::JobConfig{};
-    self->buf_cfg_.total_bytes_uncompressed = page.total_bytes;
-    self->buf_total_rows_ = page.height;
-    self->buffered_ = true;
-    self->buf_carry_len_ = 0;
-    self->buf_rows_stored_ = 0;
-    self->buf_rows_printed_ = 0;
-    self->buf_recv_bytes_ = 0;
-    self->buf_pkts_ = 0;
-    self->buf_started_ms_ = task_layout::now_ms();
-    self->buf_receiving_ = true;
-    self->buf_printing_ = true;
-    self->buf_cancel_ = false;
-    self->ipp_result_ = Err::OK;
-    self->ipp_active_ = true;
-    if (self->printhead_.begin(PrintheadConfig{page.bytes_per_line, 2000, 0}) != Err::OK) {
-        self->buffered_ = false;
-        self->ipp_active_ = false;
-        self->buf_printing_ = false;
-        self->buf_receiving_ = false;
-        DisplayService::instance().end_job();
-        return Err::HAL_FAULT;
-    }
-    return Err::OK;
-}
-
-Err PrintService::ipp_write_row(void* user, const uint8_t* row, size_t len,
-                                uint32_t row_index) noexcept {
-    auto* self = static_cast<PrintService*>(user);
-    if (!self->ipp_active_ || !self->buffered_ || row == nullptr ||
-        row_index != self->buf_rows_stored_ || len != self->buf_cfg_.total_bytes_uncompressed /
-        self->buf_total_rows_) return Err::INVALID_ARGUMENT;
-    DisplayService::instance().feed_row(row_index, row, len);
-    self->buf_rows_stored_++;
-    self->buf_recv_bytes_ += len;
-    return Err::OK;
-}
-
-Err PrintService::ipp_end_page(void* user, Err status) noexcept {
-    auto* self = static_cast<PrintService*>(user);
-    if (!self->ipp_active_) return status;
-    if (status != Err::OK) {
-        self->buf_cancel_ = true;
-        self->finish_buffered_(PrintPipeline::Event::Kind::Failed, status);
-        return status;
-    }
-    if (self->buf_rows_stored_ != self->buf_total_rows_) {
-        self->buf_cancel_ = true;
-        self->finish_buffered_(PrintPipeline::Event::Kind::Failed,
-                               Err::DECOMPRESSED_LENGTH_MISMATCH);
-        return Err::DECOMPRESSED_LENGTH_MISMATCH;
-    }
-    self->buf_receiving_ = false;
-    if (xSemaphoreTake(static_cast<SemaphoreHandle_t>(self->ipp_done_sem_),
-                       pdMS_TO_TICKS(cfg::JOB_TOTAL_TIMEOUT_MS)) != pdTRUE) {
-        self->buf_cancel_ = true;
-        self->finish_buffered_(PrintPipeline::Event::Kind::Failed, Err::JOB_TIMEOUT);
-        return Err::JOB_TIMEOUT;
-    }
-    return self->ipp_result_;
 }
 
 void PrintService::fail_mqtt_job_(Err code) noexcept {
@@ -646,13 +595,6 @@ Err PrintService::hook_cancel_print(void* user, const CancelPrintParams& p,
             !w.kv_cstr("status", "cancelling")) return Err::INTERNAL_ERROR;
         return w.end_object() ? Err::OK : Err::INTERNAL_ERROR;
     }
-    if (self->ipp_active_) {
-        self->buf_cancel_ = true;
-        self->finish_buffered_(PrintPipeline::Event::Kind::Cancelled, Err::JOB_CANCELLED);
-        if (!w.begin_object() || !w.kv_cstr("job_id", self->job_id_) ||
-            !w.kv_cstr("status", "cancelling")) return Err::INTERNAL_ERROR;
-        return w.end_object() ? Err::OK : Err::INTERNAL_ERROR;
-    }
     if (!self->pipeline_.active()) return Err::NO_ACTIVE_JOB;
     self->pipeline_.cancel();
     if (!w.begin_object() || !w.kv_cstr("job_id", self->job_id_) ||
@@ -711,7 +653,7 @@ Err PrintService::hook_feed_paper(void* user, const FeedPaperParams& p,
         return Err::JOB_ALREADY_RUNNING;
     }
     uint32_t moved = 0;
-    const Err e = self->stepper_.feed(FeedRequest{p.distance_um, 50000}, &moved);
+    const Err e = self->stepper_hal_->feed(FeedRequest{p.distance_um, 50000}, &moved);
     if (e != Err::OK) return e;
     if (!w.begin_object() || !w.kv_i64("moved_um", moved)) return Err::INTERNAL_ERROR;
     return w.end_object() ? Err::OK : Err::INTERNAL_ERROR;
@@ -719,7 +661,7 @@ Err PrintService::hook_feed_paper(void* user, const FeedPaperParams& p,
 
 Err PrintService::hook_cut_paper(void* user, JsonWriter& w) noexcept {
     auto* self = static_cast<PrintService*>(user);
-    const Err e = self->cutter_.cut();
+    const Err e = self->cutter_hal_->cut();
     if (e != Err::OK) return e;  // UNSUPPORTED 由能力门控前置拦截
     if (!w.begin_object() || !w.kv_bool("cut", true)) return Err::INTERNAL_ERROR;
     return w.end_object() ? Err::OK : Err::INTERNAL_ERROR;
@@ -767,8 +709,8 @@ void PrintService::bfp_frame_cb_(void* user, const BinFrameParser::Frame& f) noe
         self->buf_carry_len_ += static_cast<uint32_t>(take);
         off += take;
         if (self->buf_carry_len_ == bpr) {
-            DisplayService::instance().feed_row(self->buf_rows_stored_,
-                                                self->row_carry_, bpr);
+            DisplayService::instance().store_row(self->buf_rows_stored_,
+                                                 self->row_carry_, bpr);
             self->buf_rows_stored_++;
             self->buf_carry_len_ = 0;
         }
@@ -813,8 +755,9 @@ void PrintService::buffered_print_step_() noexcept {
         if (row == nullptr) return;
         fp_state_ = crc32_update(fp_state_, row, bpr);
         fp_bytes_ += bpr;
+        DisplayService::instance().feed_row(buf_rows_printed_, row, bpr);
         RasterMeta m{buf_rows_printed_};
-        const Err e = printhead_.submitRaster(row, bpr, m);
+        const Err e = printhead_hal_->submitRaster(row, bpr, m);
         if (e != Err::OK) {
             finish_buffered_(PrintPipeline::Event::Kind::Failed, Err::HAL_FAULT);
             return;
@@ -847,14 +790,6 @@ void PrintService::finish_buffered_(PrintPipeline::Event::Kind kind,
     buf_receiving_ = false;
     DisplayService::instance().end_job();
     if (data_fd_ >= 0 || close_req_) request_close_data_();
-    if (ipp_active_) {
-        ipp_result_ = code;
-        ipp_active_ = false;
-        if (ipp_done_sem_ != nullptr) {
-            xSemaphoreGive(static_cast<SemaphoreHandle_t>(ipp_done_sem_));
-        }
-    }
-
     PrintPipeline::Event ev{};
     ev.kind = kind;
     ev.code = code;
@@ -1016,7 +951,7 @@ void PrintService::rx_task_(void* arg) noexcept {
             const ssize_t n = lwip_recv(raw_fd, buf, sizeof(buf), MSG_DONTWAIT);
             if (n > 0) {
                 self->last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
-                const Err e = self->printhead_.submitRaw(buf, static_cast<size_t>(n));
+        const Err e = self->printhead_hal_->submitRaw(buf, static_cast<size_t>(n));
                 if (e != Err::OK) {
                     self->finish_raw_(PrintPipeline::Event::Kind::Failed, Err::HAL_FAULT);
                 } else {
@@ -1136,11 +1071,11 @@ void PrintService::print_task_(void* arg) noexcept {
         if (r == PrintPipeline::Pump::Done) {
             // FINALIZING：切纸评估（默认不支持 -> 警告完成）
             const bool want_cut = self->cutter_after_finish_;
-            const bool can_cut = self->cutter_.supported();
+            const bool can_cut = self->cutter_hal_->supported();
             Err warn = Err::OK;
             bool warning = false;
             if (want_cut && can_cut) {
-                const Err ce = self->cutter_.cut();
+                const Err ce = self->cutter_hal_->cut();
                 if (ce != Err::OK) {
                     warning = true;
                     warn = ce;

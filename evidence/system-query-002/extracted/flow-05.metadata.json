@@ -1,0 +1,40 @@
+{
+  "artifacts": {
+    "document": {
+      "bytes": 722531,
+      "path": "flow-05.document.bin",
+      "sha256": "23f5bb488d04f7f969ea89dbfa02d54ee1b9f1cdcd5cdc3657b12c8c3b07ca09"
+    },
+    "ipp_body": {
+      "bytes": 724336,
+      "path": "flow-05.body.ipp",
+      "sha256": "4ad34d840e100025bcd9ed32ab2e2be9cb2919e763e0aece33639d7011fe61df"
+    },
+    "request_http": {
+      "bytes": 725040,
+      "path": "flow-05.request.http",
+      "sha256": "ca86da9b0d898558fbb8e2cd38480aa5f8732e013fbd2bf997d3261af3eb2212"
+    },
+    "response_http": {
+      "bytes": 222,
+      "path": "flow-05.response.http",
+      "sha256": "d86aa5b95596c84bb9351966c7af598dd44379d27f13ef9a6f694252714f3029"
+    }
+  },
+  "chunked": true,
+  "client": {
+    "address": "172.20.10.2",
+    "port": 61542
+  },
+  "document_bytes": 722531,
+  "document_offset": 1805,
+  "http_request_line": "POST /ipp/print HTTP/1.1",
+  "http_transfer_encoding": "chunked",
+  "ipp_body_bytes": 724336,
+  "ipp_operation": 2,
+  "server": {
+    "address": "172.20.10.3",
+    "port": 631
+  },
+  "source_pcap": "evidence/system-query-002/airprint-printjob.pcap"
+}

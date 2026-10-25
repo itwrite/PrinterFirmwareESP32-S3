@@ -83,6 +83,7 @@ struct PrintProfile {
     PixelFormat pixel_format = PixelFormat::Mono1;
     const char* pixel_format_name = "mono1";
     uint16_t print_width_px = 0;          // 最大打印宽度（像素）
+    uint32_t print_width_um = 0;           // 喷头/打印区域逻辑宽度（微米，0=未知）
     uint16_t dpi = 0;
     uint16_t bytes_per_row_min = 1;       // 行字节数下限（0 = 不限）
     uint16_t bytes_per_row_max = 0;       // 行字节数上限（0 = 由 print_width_px 推导）

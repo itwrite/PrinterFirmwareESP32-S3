@@ -512,7 +512,7 @@ int main() {
 
     // ================= 12. schema 单一数据源一致性 =================
     {
-        CHECK_EQ(command_count(), 6u);
+        CHECK_EQ(command_count(), 7u);
         CHECK_TRUE(find_command("start_print", 11) != nullptr);
         CHECK_TRUE(find_command("nope", 4) == nullptr);
         // 每个命令的 cmd 与 find 互查

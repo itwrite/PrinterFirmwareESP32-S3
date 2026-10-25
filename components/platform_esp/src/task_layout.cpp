@@ -2,6 +2,8 @@
 #include "platform_esp/task_layout.h"
 
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 
 #include "platform_esp/log_adapter.h"
 
@@ -20,6 +22,23 @@ Err spawn(const char* name, TaskFunction_t fn, void* arg, BaseType_t core,
         return Err::OUT_OF_MEMORY;
     }
     return Err::OK;
+}
+
+Err spawn_with_caps(const char* name, TaskFunction_t fn, void* arg, BaseType_t core,
+                    UBaseType_t prio, uint32_t stack_bytes,
+                    uint32_t memory_caps) noexcept {
+#if configSUPPORT_STATIC_ALLOCATION == 1
+    const BaseType_t ok = xTaskCreatePinnedToCoreWithCaps(
+        fn, name, stack_bytes, arg, prio, nullptr, core, memory_caps);
+    if (ok != pdPASS) {
+        IJPD_LOGE("task", "spawn %s with caps failed", name);
+        return Err::OUT_OF_MEMORY;
+    }
+    return Err::OK;
+#else
+    (void)memory_caps;
+    return spawn(name, fn, arg, core, prio, stack_bytes);
+#endif
 }
 
 uint64_t now_ms() noexcept {

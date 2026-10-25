@@ -4,7 +4,7 @@
 
 职责：
   1. 自带 LZ4 Block 编码器（贪心哈希匹配）与解码器（用于自检回环）；
-  2. 按 docs/protocol_v1.md §6 构造 Hello 与分包帧（含存储兜底、可选 CRC32）；
+  2. 按 docs/protocols/ijpd-data-tcp.md 构造 Hello 与分包帧（含存储兜底、可选 CRC32）；
   3. selftest：编码/解码回环 + 帧流重建校验；可选用 --decoder 交叉验证固件
      解压器（host_tests/lz4_check）。
 

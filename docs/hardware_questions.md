@@ -1,8 +1,8 @@
-# 待确认硬件问题清单（Phase 0）
+# 硬件问题与闭合状态
 
-> 状态：开放。**在对应 Phase 开始前必须闭合**（见"影响阶段"列）。
-> 默认假设列：用户未及时答复时固件采用的安全假设；全部 Mock/保守路径，不驱动未知硬件。
-> 日期：2026-10-15
+> 本文只保留仍会影响真实 HAL 或量产配置的问题。未知硬件一律使用 Mock/保守路径，
+> 不驱动未经确认的喷头、电机或切纸机构。
+> 最近一次开发板验证：ESP32-S3、16 MB Flash、8 MB PSRAM、ESP-IDF 5.4.1。
 
 ---
 
@@ -10,12 +10,12 @@
 
 | # | 问题 | 默认假设 | 影响 |
 |---|---|---|---|
-| Q1 | 开发板/模组具体型号？（ESP32-S3-WROOM-1 N16R8？DevKitC-1？自制板？） | N16R8 | sdkconfig、Flash 分区表 |
-| Q2 | Flash 容量（4/8/16/32 MB）？ | 16 MB | partitions.csv |
-| Q3 | PSRAM 类型与容量（Quad/Octal，2/8/32 MB）？ | 8 MB Octal | 内存预算、槽位数 |
+| Q1 | 开发板/模组具体型号和 GPIO 清单？ | ESP32-S3 开发板；实际模组/GPIO 仍需记录 | sdkconfig、引脚和 HAL |
+| Q2 | Flash 容量（4/8/16/32 MB）？ | 当前板实测 16 MB | partitions.csv |
+| Q3 | PSRAM 类型与容量（Quad/Octal，2/8/32 MB）？ | 当前板实测 8 MB Octal | 内存预算、槽位数 |
 | Q4 | 除 PSRAM/Flash/USB/JTAG 保留引脚外，可用 GPIO 清单？ | 未定 → HAL 全 Mock | 引脚分配表 |
 | Q5 | 供电方式（USB 5V？外置 12/24V？喷头独立电源？） | USB 供电仅够固件开发 | 电源树、安全停机逻辑 |
-| Q6 | Wi-Fi 配网方式偏好：BLE 配网 / SoftAP+网页 / 出厂预烧 / 串口写入？ | **未定（开放决策 D-11，Phase 5 前需确认）** | 平台层实现 |
+| Q6 | Wi-Fi 配网方式是否需要替换？ | 当前实现为 SoftAP+HTTP：`IJPD-Setup-XXXX`，网关 `192.168.4.1` | 平台层实现 |
 
 ## B. 喷头（Phase 7 前必须闭合；未闭合前只有 MockPrintheadHal）
 
@@ -72,7 +72,7 @@
 
 | 组 | 状态 | 阻塞的 Phase |
 |---|---|---|
-| A 主控板卡 | 开放（Q6 配网方式为开放决策） | Phase 5 |
+| A 主控板卡 | 部分闭合：Flash/PSRAM 已验证，具体模组/GPIO 待记录 | 真实 HAL 前 |
 | B 喷头 | 开放（**阻塞真实打印，不阻塞 Phase 1–6**） | Phase 7 |
 | C 走纸 | 开放 | Phase 7 |
 | D 切纸 | 开放（默认 UNSUPPORTED） | Phase 7 |

@@ -6,7 +6,7 @@
 // 容量上限：  无。
 // 最大耗时：  err_name() 一次 switch，O(1)。
 //
-// 错误码集合与 docs/protocol_v1.md §3.3 一一对应（23 条协议错误码 + OK）。
+// 错误码集合与 docs/protocols/ijpd-control.md 一一对应（23 条协议错误码 + OK）。
 // err_name() 是全系统唯一“码 → 字符串”映射，JSON error.code 字段直接使用其返回值。
 // ============================================================================
 #ifndef IJPD_CORE_ERRORS_H

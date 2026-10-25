@@ -1,0 +1,5 @@
+Browsing for _ipp._tcp.local
+DATE: ---Sat 24 Oct 2026---
+14:15:12.398  ...STARTING...
+Timestamp     A/R    Flags  if Domain               Service Type         Instance Name
+14:15:12.399  Add        2  15 local.               _ipp._tcp.           IJPD Query Probe

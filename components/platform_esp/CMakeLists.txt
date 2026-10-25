@@ -5,7 +5,6 @@ idf_component_register(
          "src/control_tcp_server.cpp"
          "src/data_tcp_server.cpp"
           "src/display_service.cpp"
-          "src/ipp_server.cpp"
           "src/mdns_broadcast.cpp"
           "src/mqtt_adapter.cpp"
           "src/provisioning_portal.cpp"
@@ -14,6 +13,6 @@ idf_component_register(
           "src/task_layout.cpp"
          "src/wifi_manager.cpp"
     INCLUDE_DIRS "include"
-     REQUIRES core bt esp_wifi esp_event esp_netif nvs_flash lwip esp_timer esp_hw_support esp_psram mdns mqtt esp_http_server esp_lcd esp_lcd_ili9341 driver
+     REQUIRES core bt esp_wifi esp_event esp_netif nvs_flash lwip esp_timer esp_hw_support esp_psram mdns mqtt esp_lcd esp_lcd_ili9341 driver
 )
 add_compile_options(-Werror)

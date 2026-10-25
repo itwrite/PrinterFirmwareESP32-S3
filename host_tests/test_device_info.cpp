@@ -107,7 +107,7 @@ int main() {
                std::string::npos);
 
     // ---- 3. commands 元数据与 schema 同源 ----
-    CHECK_EQ(count_of(out, "\"cmd\":\""), 6u);
+    CHECK_EQ(count_of(out, "\"cmd\":\""), 7u);
     CHECK_EQ(count_of(out, "\"key\":\""), 15u);  // start_print增加transport
     CHECK_TRUE(near_after(out, "\"cmd\":\"cut_paper\"", "\"supported\":false"));
     CHECK_TRUE(near_after(out, "\"cmd\":\"feed_paper\"", "\"supported\":true"));

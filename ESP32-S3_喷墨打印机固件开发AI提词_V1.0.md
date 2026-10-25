@@ -195,7 +195,8 @@ firmware/
 │   ├── send_job.py                # 控制+数据双通道模拟客户端
 │   └── README.md
 ├── docs/
-│   ├── protocol_v1.md
+│   ├── protocols/                  # 第三方协议文档
+│   ├── middleware.md               # Profile/HAL 接入
 │   ├── memory_budget.md
 │   └── hardware_questions.md
 └── README.md
@@ -765,7 +766,7 @@ AI 必须提供可用的：
 
 - 完整工程目录和所有源文件。
 - `README.md`（依赖、构建、烧录、测试、故障排查）。
-- `docs/protocol_v1.md`（协议文档）与示例 JSON/二进制包生成脚本。
+- `docs/protocols/`（当前协议文档）与示例 JSON/二进制包生成脚本。
 - 测试清单、覆盖说明、已知限制。
 - 明确标注已完成、模拟实现、待硬件验证的功能。
 - 《依赖审计报告》：列出所有外部代码及其许可证。

@@ -1,0 +1,47 @@
+{
+  "artifacts": {
+    "http_request": {
+      "bytes": 347,
+      "path": "request.http",
+      "sha256": "b796ccf4c06c018e659f80dd701b90545a77882ac967b014016f5f88f35ab948"
+    },
+    "http_response": {
+      "bytes": 388,
+      "path": "response.http",
+      "sha256": "fdb2f5afc6245c91ca2ba74a3f95a807f286a4fcc74c2608a51c1d0f05d0570b"
+    },
+    "ipp_request": {
+      "bytes": 225,
+      "path": "request.ipp",
+      "sha256": "7bf82e41c1467af1cf85b28314a2bad0f005f9c4fb622d7579c7a3f376383731"
+    },
+    "ipp_response": {
+      "bytes": 298,
+      "path": "response.ipp",
+      "sha256": "c47d5ba18d1f5b56459081538e4690a89e8de2fccb2a877490b28c01493c5105"
+    }
+  },
+  "captured_at_utc": "2026-10-24T05:04:08.045921+00:00",
+  "host": "172.20.10.3",
+  "http_headers": {
+    "connection": "close",
+    "content-length": "298",
+    "content-type": "application/ipp"
+  },
+  "http_reason": "OK",
+  "http_status": 200,
+  "ipp_response_request_id": 1,
+  "ipp_response_status_code": 0,
+  "ipp_response_version": "2.0",
+  "ipp_version_requested": "2.0",
+  "path": "/ipp/print",
+  "port": 631,
+  "printer_uri": "ipp://172.20.10.3/ipp/print",
+  "request_id": 1,
+  "requested_attributes": [
+    "printer-name",
+    "operations-supported",
+    "document-format-supported",
+    "urf-supported"
+  ]
+}

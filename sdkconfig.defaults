@@ -49,3 +49,8 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 # WPA3（iPhone 热点默认加密方式）
 CONFIG_ESP_WIFI_ENABLE_WPA3=y
 CONFIG_ESP_WIFI_ENABLE_SAE=y
+
+# Keep general Wi-Fi fast paths in IRAM, but leave Wi-Fi RX code in flash.
+# This preserves the common control/tx path while recovering IRAM headroom.
+CONFIG_ESP_WIFI_IRAM_OPT=y
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n

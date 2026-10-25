@@ -1,6 +1,7 @@
-# 依赖审计报告（Phase 8）
+# 依赖审计报告
 
-> 依据：任务书第二章《自研优先与依赖政策》
+> 依据：当前 `main/idf_component.yml`、组件 CMake 和构建配置。
+> 最近更新：2026-10-24
 
 ## 1. `third_party/` 目录
 
@@ -8,7 +9,7 @@
 
 ## 2. 实际使用的外部代码
 
-### L0：ESP-IDF v5.4.1 内置组件（允许直接使用）
+### L0：ESP-IDF v5.4.1 和已声明组件（允许直接使用）
 
 | 组件/模块 | 许可证 | 用途 |
 |---|---|---|
@@ -21,6 +22,10 @@
 | nvs_flash | Apache-2.0 | Wi-Fi 校准数据 / NimBLE 持久化 |
 | esp_hw_support（efuse/MAC） | Apache-2.0 | 设备 ID（esp_read_mac） |
 | esp_random | Apache-2.0 | data_token 生成（硬件 RNG） |
+| mdns | Apache-2.0 | `_ijpd._tcp` DNS-SD 广播 |
+| esp-mqtt | Apache-2.0 | 可选 MQTT 控制和 IJCH 分片 |
+| esp_lcd / esp_lcd_ili9341 | Apache-2.0 | 当前 Mock 预览显示 |
+| NVS / provisioning / lwIP socket | Apache-2.0/BSD | SoftAP 配网和凭据保存 |
 | ESP-IDF 构建/工具链 | Apache-2.0 | CMake / idf.py / xtensa-gcc |
 
 ESP-IDF 总体许可证：Apache-2.0（允许闭源商用，符合任务书 2.3 准入标准第 1 条）。
@@ -55,5 +60,5 @@ ESP-IDF 总体许可证：Apache-2.0（允许闭源商用，符合任务书 2.3 
 ## 4. 结论
 
 - **零第三方依赖引入固件产物。**
-- 所有自研模块通过主机侧单元测试 + fuzz + TSan（见 `docs/test_report.md`）。
+- 所有自研模块通过主机侧单元测试 + fuzz + TSan（见 `test_report.md`）。
 - 工程结构符合"core 不含 ESP-IDF 头文件 / hal 仅接口"铁律。

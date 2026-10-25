@@ -50,7 +50,7 @@ struct CommandSpec {
     uint8_t param_count;
 };
 
-// 白名单查表（线性，6 项）；未找到返回 nullptr
+// 白名单查表（线性）；未找到返回 nullptr
 const CommandSpec* find_command(const char* name, size_t name_len) noexcept;
 
 // 全量命令（device_info 遍历用）

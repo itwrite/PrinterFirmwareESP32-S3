@@ -45,16 +45,28 @@ ble_uuid128_t g_notify_uuid;
 
 void BleControlServer::start_advertising_() noexcept {
     struct ble_hs_adv_fields fields;
+    struct ble_hs_adv_fields rsp_fields;
     memset(&fields, 0, sizeof(fields));
+    memset(&rsp_fields, 0, sizeof(rsp_fields));
+
+    // Legacy advertising data is limited to 31 bytes. Keep the service UUID
+    // in the primary packet and put the human-readable name in scan response:
+    // flags (3) + UUID128 (18) + name (14) would otherwise exceed the limit.
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.name = reinterpret_cast<const uint8_t*>(ble_svc_gap_device_name());
-    fields.name_len = static_cast<uint8_t>(strlen(ble_svc_gap_device_name()));
     fields.uuids128 = &g_svc_uuid;
     fields.uuids128_is_complete = 1;
     fields.num_uuids128 = 1;
+    rsp_fields.name = reinterpret_cast<const uint8_t*>(ble_svc_gap_device_name());
+    rsp_fields.name_len = static_cast<uint8_t>(strlen(ble_svc_gap_device_name()));
+    rsp_fields.name_is_complete = 1;
     int rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
         IJPD_LOGE(kTag, "adv fields rc=%d", rc);
+        return;
+    }
+    rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
+    if (rc != 0) {
+        IJPD_LOGE(kTag, "adv response fields rc=%d", rc);
         return;
     }
     struct ble_gap_adv_params params;

@@ -1,7 +1,7 @@
 // ============================================================================
 // frame_splitter.h —— 以 '#' 为界的控制帧有界拆帧器（Phase 1）
 //
-// 协议行为（docs/protocol_v1.md §2.3）：
+// 协议行为（docs/protocols/ijpd-control.md）：
 //   - 第一个 '#' 即帧结束；空帧（'#' 前无字节）静默忽略；
 //   - 正文超过 MAX_CONTROL_FRAME_SIZE：丢弃至下一个 '#'，计为 too_large，
 //     缓冲区绝不增长（调用方据 too_large 计数逐帧回 FRAME_TOO_LARGE，msg_id=null）；

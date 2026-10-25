@@ -47,17 +47,18 @@
 |---|---|---|
 | 真实喷墨打印 | 喷头型号/时序/波形未知（`docs/hardware_questions.md` B 组） | 用户提供官方资料 |
 | 真实走纸/切纸 | 电机/传感器型号未知（C/D 组） | 同上 |
-| Wi-Fi / BLE / TCP 设备行为 | 编译零告警但无设备 | ESP32-S3 硬件接入 |
-| 吞吐量与水位实测 | 无设备 | `tools/send_job.py` 联调后补录 `memory_budget.md` |
+| Wi-Fi / BLE / TCP 设备行为 | 默认 Mock 镜像已在 ESP32-S3 启动；完整打印链路仍待联调 | 真实喷头/机械硬件 |
+| 吞吐量与水位实测 | 数量级预算已完成，设备数据待补录 | `tools/send_job.py` 联调后更新 `memory_budget.md` |
 | 任务栈高水位 | 使用初值 | `uxTaskGetStackHighWaterMark` 实测后固定 |
-| Wi-Fi 配网方式 | 开放决策 D-11 | 用户选定（当前 menuconfig） |
+| Wi-Fi 配网方式 | 当前为 SoftAP HTTP 门户 | 如需替换再改平台层 |
 
 ### 通用固件配置
 
 通过 `core/printer_config.h` 的 `PrinterConfig` 选择打印机变体。Profile、设备型号
-和服务开关均可按硬件配置；未声明的服务默认关闭。当前已实现 IJPD TCP、BLE IJPD
-控制和可选 ESC/POS RAW TCP（默认 9102）。MQTT/AirPrint 配置字段已预留，但适配器
-完成前不会报告为可用。
+和服务开关均可按硬件配置；未声明的服务默认关闭。当前默认镜像启用 IJPD TCP、BLE
+控制和 TCP 数据通道；ESC/POS RAW TCP、MQTT 为可选服务。AirPrint Core 和
+query/Print-Job service 仅在 `AIRPRINT_ENABLE=ON` 的显式构建中包含，默认镜像不
+监听 TCP 631 或发布 IPP mDNS。
 
 ---
 
@@ -68,26 +69,28 @@
 ├── CMakeLists.txt            # ESP-IDF 顶层
 ├── sdkconfig.defaults        # esp32s3 / Octal PSRAM / NimBLE 外设 / TWDT
 ├── partitions.csv            # 16MB：nvs + phy + factory(3MB)
-├── main/                     # app_main + Kconfig（Wi-Fi 凭据）
+├── main/                     # app_main + Kconfig
 ├── components/
 │   ├── core/                 # 平台无关纯 C++（14 模块，可主机编译，零 IDF 依赖）
 │   ├── platform_esp/         # Wi-Fi / TCP×2 / BLE(NimBLE) / PSRAM / 任务 / 日志
-│   ├── printer_hal/          # IPrintheadHal / IStepperHal / ICutterHal + Mock ×3
+│   ├── printer_hal/          # IPrintheadHal / IStepperHal / ICutterHal + Ricoh/Mock HALs
 │   │                         # 注：任务书 hal/ 与 IDF 内置组件 hal 同名冲突，更名
-│   └── app/                  # control_plane / device_info / print_service / printer_app
-├── host_tests/               # 17 项测试（自写断言 + ASan/UBSan/TSan + fuzz 固定种子）
+│   ├── app/                  # control_plane / device_info / print_service / printer_app
+│   ├── airprint_core/        # opt-in 平台无关 IPP/HTTP/Job Core 和样本契约
+│   └── airprint_esp/         # opt-in ESP-IDF HTTP/mDNS/query/Print-Job transport
+├── host_tests/               # 40 项测试（自写断言 + ASan/UBSan/TSan + fuzz 固定种子）
 ├── tools/                    # make_packets.py / send_job.py（仅 Python 标准库）
 └── docs/                     # 协议 / 内存预算 / 决策 / 硬件问题 / 测试报告 / 依赖审计
 ```
 
 ## 快速开始
 
-### 主机测试（无需硬件，~70s）
+### 主机测试（无需硬件，~90s）
 
 ```bash
 cmake -S host_tests -B host_tests/build
 cmake --build host_tests/build
-ctest --test-dir host_tests/build --output-on-failure   # 17 项 / ~57 万断言
+ctest --test-dir host_tests/build --output-on-failure   # 40 项 / ~57 万断言
 ```
 
 TSan（并发模块改动后建议运行）：
@@ -103,10 +106,18 @@ ctest --test-dir host_tests/build_tsan -R "slot_pool|state_machine|stats|print_p
 ```bash
 source ~/esp/esp-idf/export.sh
 idf.py set-target esp32s3
-idf.py menuconfig                    # IJPD Printer → Wi-Fi SSID / 密码
-idf.py build                         # 零告警，固件 648KB
+idf.py menuconfig                    # 基础 IDF 配置；首次联网使用 SoftAP 配网
+idf.py build                         # 固件构建；现有平台组件仍有既有 warning
 idf.py -p <PORT> flash monitor       # 需真实设备
 ```
+
+显式构建 AirPrint query/Print-Job Mock 服务（支持按需 SoftAP 配网）：
+
+```bash
+tools/idf.sh -B build-airprint-probe build -DAIRPRINT_ENABLE=ON
+```
+
+真机联调步骤见 [docs/airprint_probe_runbook.md](docs/airprint_probe_runbook.md)。
 
 ### 端到端联调（需设备在线）
 
@@ -118,7 +129,8 @@ python3 tools/send_job.py --host <设备IP> --break-after 12     # 断开数据�
 python3 tools/send_job.py --host <设备IP> --never-connect       # 数据连接超时
 ```
 
-BLE：搜索设备名 `IJPD-Printer`，写入/通知 UUID 见 `docs/protocol_v1.md` §2.2。
+BLE：搜索设备名 `IJPD-Printer`，UUID 和分片规则见
+`docs/protocols/ble-gatt.md`。
 
 ## 故障排查
 
@@ -126,7 +138,7 @@ BLE：搜索设备名 `IJPD-Printer`，写入/通知 UUID 见 `docs/protocol_v1.
 |---|---|
 | `idf.py build` 报 PSRAM 头文件找不到 | 确认 `idf.py set-target esp32s3` 已执行；sdkconfig.defaults 被读取 |
 | PSRAM 初始化失败 | 板卡可能非 Octal PSRAM（改 `CONFIG_SPIRAM_MODE_QUAD=y`）；确认模组带 PSRAM |
-| Wi-Fi 不连接 | `idf.py menuconfig` 检查 SSID/密码；日志 `wifi:` 标签查看重连退避 |
+| Wi-Fi 不连接 | 连接 `IJPD-Setup-XXXX` 并访问 `http://192.168.4.1` 完成配网；日志 `wifi:` 标签查看重连退避 |
 | BLE 搜不到 | NimBLE 仅外设角色；确认设备名 `IJPD-Printer`；广播在同步后自动启动 |
 | TCP 连不上 | 确认设备与主机同一网段；控制端口 9100，数据端口 9101 |
 | `PSRAM_UNAVAILABLE` 响应 | `get_device_info` 检查 `memory.psram_available`；启动日志 `psram:` 标签 |
@@ -134,14 +146,38 @@ BLE：搜索设备名 `IJPD-Printer`，写入/通知 UUID 见 `docs/protocol_v1.
 
 ## 文档索引
 
+完整文档导航见 [docs/README.md](docs/README.md)。
+
+### 第三方协议对接（当前实现）
+
 | 文档 | 内容 |
 |---|---|
-| [docs/protocol_v1.md](docs/protocol_v1.md) | 控制 JSON 与二进制分包协议 V1.0 定稿 |
+| [docs/firmware_service_status.md](docs/firmware_service_status.md) | 当前固件所有对外服务、端口、广播、默认/AirPrint 变体状态 |
+| [docs/protocols/README.md](docs/protocols/README.md) | 协议总览、默认启用状态和对接路径 |
+| [docs/protocols/ijpd-control.md](docs/protocols/ijpd-control.md) | TCP/BLE/MQTT 共用的 IJPD JSON 控制协议 |
+| [docs/protocols/ijpd-data-tcp.md](docs/protocols/ijpd-data-tcp.md) | TCP 9101 Hello、二进制分包、CRC32、LZ4 |
+| [docs/protocols/ble-gatt.md](docs/protocols/ble-gatt.md) | BLE GATT UUID、分片和通知协议 |
+| [docs/protocols/provisioning-http.md](docs/protocols/provisioning-http.md) | SoftAP HTTP 配网接口 |
+| [docs/protocols/mdns.md](docs/protocols/mdns.md) | `_ijpd._tcp` mDNS/DNS-SD 发现 |
+| [docs/protocols/escpos-raw-tcp.md](docs/protocols/escpos-raw-tcp.md) | 可选 ESC/POS RAW TCP 字节流 |
+| [docs/protocols/mqtt.md](docs/protocols/mqtt.md) | 可选 MQTT 控制、事件和 IJCH 任务分片 |
+
+以上文档以当前源码为准。默认固件不提供 IPP/AirPrint；显式 AirPrint variant
+可把验证过的 `image/urf` 送入 RICOH logical CMYK8 Mock，但尚未形成真实喷头
+打印链路。
+
+### 工程设计和测试
+
+| 文档 | 内容 |
+|---|---|
+| [docs/middleware.md](docs/middleware.md) | 打印机厂商接入 Profile/HAL 的简明指南 |
+| [RICOH_MH5440_Mock_HAL.md](RICOH_MH5440_Mock_HAL.md) | RICOH MH5440 逻辑 Mock、故障注入和未来真实 HAL 迁移边界 |
 | [docs/memory_budget.md](docs/memory_budget.md) | PSRAM/SRAM 分配表 + 任务布局 |
-| [docs/phase0_decisions.md](docs/phase0_decisions.md) | Phase 0 决策报告（已知/假设/风险/选型） |
-| [docs/hardware_questions.md](docs/hardware_questions.md) | 待确认硬件问题清单（Phase 7 前必须闭合） |
-| [docs/test_report.md](docs/test_report.md) | 测试矩阵 / 57 万断言 / 已知限制 |
+| [docs/hardware_questions.md](docs/hardware_questions.md) | 待确认硬件问题清单 |
+| [docs/test_report.md](docs/test_report.md) | 测试矩阵 / 当前验证结果 |
 | [docs/dependency_audit.md](docs/dependency_audit.md) | 依赖审计（third_party/ 为空） |
+| [docs/clion_setup.md](docs/clion_setup.md) | CLion、ESP-IDF、烧录和调试环境 |
+| [docs/TODO.md](docs/TODO.md) | 当前未完成事项和后续工作 |
 | [tools/README.md](tools/README.md) | 工具用法 |
 
 ## 安全声明
@@ -149,4 +185,4 @@ BLE：搜索设备名 `IJPD-Printer`，写入/通知 UUID 见 `docs/protocol_v1.
 - 真实喷头驱动时序/电压/点火波形**未实现**，在用户提供官方资料前仅 Mock，不生成点火代码。
 - A4988 仅用于兼容步进电机走纸，绝不作为喷头驱动器。
 - 切纸硬件未确认前 `cut_paper` 返回 `UNSUPPORTED`，不驱动任何 GPIO。
-- 令牌/密码不出现在日志中；Wi-Fi 凭据存于 menuconfig（sdkconfig 为生成文件不提交）。
+- 令牌/密码不出现在日志中；Wi-Fi 凭据由 SoftAP 配网门户保存到 NVS。

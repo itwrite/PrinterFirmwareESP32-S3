@@ -102,18 +102,17 @@ bool write_capabilities_section(JsonWriter& w, const DeviceInfo& di) noexcept {
     if (!w.key("services") || !w.begin_object()) return false;
     if (!w.kv_bool("wifi", di.services.wifi) ||
         !w.kv_bool("ble", di.services.ble) ||
-        !w.kv_bool("ijpd_tcp", di.services.ijpd_tcp) ||
-        !w.kv_bool("escpos_raw_tcp", di.services.escpos_raw_tcp) ||
-        !w.kv_bool("mqtt", di.services.mqtt) ||
-        !w.kv_bool("airprint", di.services.airprint) ||
-        !w.end_object()) return false;
+         !w.kv_bool("ijpd_tcp", di.services.ijpd_tcp) ||
+         !w.kv_bool("escpos_raw_tcp", di.services.escpos_raw_tcp) ||
+         !w.kv_bool("mqtt", di.services.mqtt) ||
+#if defined(IJPD_AIRPRINT_ENABLED)
+         !w.kv_bool("airprint", di.services.airprint) ||
+#endif
+         !w.end_object()) return false;
     if (!w.key("service_ports") || !w.begin_object()) return false;
     if (di.services.escpos_raw_tcp
             ? !w.kv_i64("escpos_raw_tcp", di.escpos_raw_tcp_port)
             : !w.kv_null("escpos_raw_tcp")) return false;
-    if (di.services.airprint
-            ? !w.kv_i64("airprint", di.airprint_port)
-            : !w.kv_null("airprint")) return false;
     if (!w.end_object()) return false;
     // Profile 传感器上报
     if (!w.key("sensors") || !w.begin_array()) return false;

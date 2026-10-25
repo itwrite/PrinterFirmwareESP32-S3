@@ -27,6 +27,7 @@ public:
     // 启动配网门户（SoftAP + HTTP 服务器）
     // 返回 OK = 进入配网模式；否则 = 错误
     Err start() noexcept;
+    Err start_on_demand() noexcept { return start(); }
 
     // 停止配网门户（连接成功后调用）
     void stop() noexcept;

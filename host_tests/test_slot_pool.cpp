@@ -187,10 +187,12 @@ int main() {
                 const uint32_t len = 16 + (seq % 64);
                 fill_pattern(pool.slot_data(s), s, seq, len);
                 // 提交使用当前代次（读取可能恰逢取消 -> 元素将被消费端丢弃）
-                if (pool.commit_filled(s, seq, len, pool.generation()) == Err::OK) {
+                const Err commit_error = pool.commit_filled(s, seq, len, pool.generation());
+                if (commit_error == Err::OK) {
                     ++seq;
                     produced.fetch_add(1);
-                } else {
+                } else if (commit_error != Err::STALE_GENERATION) {
+                    // STALE_GENERATION already recycles the filling slot.
                     CHECK_TRUE(pool.abort_fill(s) == Err::OK);
                 }
             }

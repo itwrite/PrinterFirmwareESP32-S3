@@ -1,0 +1,130 @@
+{
+  "documents": [
+    {
+      "analysis_limits": {
+        "max_bytes_per_row": 16777216,
+        "max_pages": 1024
+      },
+      "bytes": 707738,
+      "format": "apple-raster-public-cups-framing",
+      "page_count_analyzed": 1,
+      "page_count_declared": 1,
+      "pages": [
+        {
+          "bits_per_color": 8,
+          "bits_per_pixel": 8,
+          "bytes_per_pixel": 1,
+          "bytes_per_row": 850,
+          "clear_to_end_rows": 0,
+          "color_space": "SW",
+          "color_space_code": 0,
+          "colors": 1,
+          "compressed_bytes": 707694,
+          "data_offset": 44,
+          "decoded_bytes": 935000,
+          "dpi_x": 100,
+          "dpi_y": 100,
+          "duplex_code": 1,
+          "header_hex": "080001000000000000000000000003520000044c000000640000000000000000",
+          "header_offset": 12,
+          "height_px": 1100,
+          "max_commands_per_row": 172,
+          "max_row_repeat": 86,
+          "media_position_code": 0,
+          "media_type_code": 0,
+          "page_end_offset": 707738,
+          "page_index": 1,
+          "print_quality_code": 0,
+          "row_commands": 98010,
+          "row_crc32": "9b3ac4d5",
+          "rows_decoded": 1100,
+          "width_px": 850
+        }
+      ],
+      "references": [
+        "https://github.com/OpenPrinting/libcups/blob/master/cups/raster.h",
+        "https://raw.githubusercontent.com/OpenPrinting/libcups/master/cups/raster-stream.c",
+        "https://github.com/istopwg/ippsample/blob/master/tools/ippdoclint.c"
+      ],
+      "sha256": "842b0654bf29e8106391ceae9b3783799d1aeaf5a16f109433856fc0a0817457",
+      "source": "evidence/golden-samples/urf-photo-preview-707738/document.bin",
+      "sync": "UNIRAST\u0000",
+      "trailing_bytes": 0,
+      "unknowns": [
+        "undocumented/vendor meaning of reserved page-header bytes",
+        "application-level interpretation of the captured image content",
+        "whether all client variants use the same row encoding and page count"
+      ]
+    },
+    {
+      "analysis_limits": {
+        "max_bytes_per_row": 16777216,
+        "max_pages": 1024
+      },
+      "bytes": 722531,
+      "format": "apple-raster-public-cups-framing",
+      "page_count_analyzed": 1,
+      "page_count_declared": 1,
+      "pages": [
+        {
+          "bits_per_color": 8,
+          "bits_per_pixel": 8,
+          "bytes_per_pixel": 1,
+          "bytes_per_row": 850,
+          "clear_to_end_rows": 0,
+          "color_space": "SW",
+          "color_space_code": 0,
+          "colors": 1,
+          "compressed_bytes": 722487,
+          "data_offset": 44,
+          "decoded_bytes": 935000,
+          "dpi_x": 100,
+          "dpi_y": 100,
+          "duplex_code": 1,
+          "header_hex": "080001000000000000000000000003520000044c000000640000000000000000",
+          "header_offset": 12,
+          "height_px": 1100,
+          "max_commands_per_row": 282,
+          "max_row_repeat": 86,
+          "media_position_code": 0,
+          "media_type_code": 0,
+          "page_end_offset": 722531,
+          "page_index": 1,
+          "print_quality_code": 0,
+          "row_commands": 121817,
+          "row_crc32": "ea4be99e",
+          "rows_decoded": 1100,
+          "width_px": 850
+        }
+      ],
+      "references": [
+        "https://github.com/OpenPrinting/libcups/blob/master/cups/raster.h",
+        "https://raw.githubusercontent.com/OpenPrinting/libcups/master/cups/raster-stream.c",
+        "https://github.com/istopwg/ippsample/blob/master/tools/ippdoclint.c"
+      ],
+      "sha256": "23f5bb488d04f7f969ea89dbfa02d54ee1b9f1cdcd5cdc3657b12c8c3b07ca09",
+      "source": "evidence/golden-samples/urf-photo-preview-722531/document.bin",
+      "sync": "UNIRAST\u0000",
+      "trailing_bytes": 0,
+      "unknowns": [
+        "undocumented/vendor meaning of reserved page-header bytes",
+        "application-level interpretation of the captured image content",
+        "whether all client variants use the same row encoding and page count"
+      ]
+    }
+  ],
+  "note": "Comparison is limited to public framing and row statistics; no raster field is inferred beyond the cited CUPS format.",
+  "same_verified_fields": {
+    "bits_per_pixel": true,
+    "bytes_per_row": true,
+    "color_space_code": true,
+    "decoded_bytes": true,
+    "dpi_x": true,
+    "dpi_y": true,
+    "height_px": true,
+    "page_count_declared": true,
+    "row_crc32": false,
+    "rows_decoded": true,
+    "width_px": true
+  }
+}

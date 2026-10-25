@@ -1,8 +1,7 @@
 // ============================================================================
 // wifi_manager.h —— Wi-Fi STA 管理（Phase 5）
 //
-// 凭据来源：Kconfig（CONFIG_IJPD_WIFI_SSID/PASSWORD，menuconfig 配置；
-// 正式配网方式为开放决策 docs/hardware_questions.md Q6/D-11）。
+// 凭据来源：NVS 中已保存的配网凭据；无可用凭据时启动 SoftAP HTTP 门户。
 // 断线自动重连（事件驱动，1s 退避）。不记录密码。
 // ============================================================================
 #ifndef IJPD_PLATFORM_WIFI_MANAGER_H
@@ -21,6 +20,8 @@ class ProvisioningPortal;
 class WifiManager {
 public:
     Err start() noexcept;  // 有凭据→STA；无→SoftAP 配网门户
+    Err request_provisioning() noexcept;  // 延迟到当前控制响应发送后切换
+    void process_pending_requests() noexcept;
     bool connected() const noexcept { return connected_; }
     ~WifiManager();
 
@@ -35,6 +36,7 @@ private:
     int backoff_ms_ = 1000;
     ProvisioningPortal* portal_ = nullptr;
     volatile bool portal_active_ = false;  // 门户模式：禁止 STA 重试
+    volatile bool provisioning_requested_ = false;
 };
 
 }  // namespace ijpd

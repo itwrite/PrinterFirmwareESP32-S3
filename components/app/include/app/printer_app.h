@@ -22,9 +22,11 @@
 #include "platform_esp/data_tcp_server.h"
 #include "platform_esp/raw_tcp_server.h"
 #include "platform_esp/mqtt_adapter.h"
-#include "platform_esp/ipp_server.h"
 #include "platform_esp/psram_allocator.h"
 #include "platform_esp/wifi_manager.h"
+#if defined(IJPD_AIRPRINT_ENABLED)
+#include "airprint_esp/airprint_probe.h"
+#endif
 
 namespace ijpd {
 
@@ -38,13 +40,17 @@ public:
     void set_profile(const PrintProfile* profile) noexcept { config_.profile = profile; }
     // 注入完整打印机配置；未声明的服务默认不启动。
     void set_config(const PrinterConfig* config) noexcept;
+    // 注入非 owning HAL；必须在 start() 前调用。
+    void set_hal_bundle(const PrinterHalBundle& bundle) noexcept;
 
 private:
     PrinterApp() noexcept = default;
     PrinterConfig config_{};
+    PrinterHalBundle hal_bundle_{};
 
     // Router 钩子（结果写入）
     static Err hook_device_info(void* user, JsonWriter& w) noexcept;
+    static Err hook_start_provisioning(void* user, JsonWriter& w) noexcept;
     static Err hook_print_status(void* user, JsonWriter& w) noexcept;
     static Err hook_start_print(void* user, const StartPrintParams& p, JsonWriter& w) noexcept;
     static Err hook_cancel_print(void* user, const CancelPrintParams& p, JsonWriter& w) noexcept;
@@ -55,6 +61,7 @@ private:
     static void tcp_feed(void* user, int ch, const uint8_t* data, size_t len) noexcept;
     static void tcp_tick(void* user) noexcept;
     static void service_tick_task_(void* user) noexcept;
+    static void airprint_start_task_(void* user) noexcept;
     void tick_services_() noexcept;
     static void tcp_channel_closed(void* user, int ch) noexcept;
     static void tcp_register_sink(void* user, int ch, void* sink_user,
@@ -78,13 +85,22 @@ private:
     DataTcpServer data_tcp_;
     RawTcpServer raw_tcp_;
     MqttAdapter mqtt_;
-    IppServer ipp_;
     BleControlServer ble_;
+#if defined(IJPD_AIRPRINT_ENABLED)
+    airprint::AirPrintProbe airprint_probe_;
+    airprint::AirPrintCapabilities airprint_capabilities_{};
+    char airprint_printer_uri_[128] = {};
+    char airprint_more_info_url_[128] = {};
+#endif
 
     DeviceInfo di_{};
     char device_id_[16] = {0};
     bool mdns_started_ = false;  // Wi-Fi 就绪后惰性启动(tcp_tick 重试)
-    bool mdns_ipp_started_ = false;
+#if defined(IJPD_AIRPRINT_ENABLED)
+    volatile bool airprint_started_ = false;
+    volatile bool airprint_start_queued_ = false;
+    volatile bool airprint_start_attempted_ = false;
+#endif
     volatile bool service_tick_running_ = false;
 };
 

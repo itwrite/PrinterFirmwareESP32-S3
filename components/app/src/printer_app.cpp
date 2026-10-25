@@ -10,6 +10,8 @@
 #include "platform_esp/log_adapter.h"
 #include "platform_esp/mdns_broadcast.h"
 #include "platform_esp/task_layout.h"
+#include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 
 namespace ijpd {
 namespace {
@@ -25,6 +27,10 @@ void PrinterApp::set_config(const PrinterConfig* config) noexcept {
     if (config != nullptr) config_ = *config;
 }
 
+void PrinterApp::set_hal_bundle(const PrinterHalBundle& bundle) noexcept {
+    hal_bundle_ = bundle;
+}
+
 // ---------------------------------------------------------------- Router 钩子
 
 Err PrinterApp::hook_device_info(void* user, JsonWriter& w) noexcept {
@@ -35,6 +41,24 @@ Err PrinterApp::hook_device_info(void* user, JsonWriter& w) noexcept {
     self->di_.psram_total_bytes = self->mem_.psram_total_bytes;
     self->di_.psram_free_bytes = self->mem_.psram_free_bytes;
     return write_device_info_result(w, self->di_);
+}
+
+Err PrinterApp::hook_start_provisioning(void* user, JsonWriter& w) noexcept {
+    auto* self = static_cast<PrinterApp*>(user);
+    if (PrintService::instance().has_active_job()) return Err::JOB_ALREADY_RUNNING;
+#if defined(IJPD_AIRPRINT_ENABLED)
+    if (self->airprint_probe_.has_active_job()) return Err::JOB_ALREADY_RUNNING;
+#endif
+    if (self->wifi_.request_provisioning() != Err::OK) return Err::INTERNAL_ERROR;
+    if (!w.begin_object() ||
+        !w.kv_cstr("status", "portal_starting") ||
+        !w.kv_cstr("ssid", "IJPD-Setup-XXXX") ||
+        !w.kv_cstr("ip", "192.168.4.1") ||
+        !w.kv_i64("port", 80) ||
+        !w.end_object()) {
+        return Err::INTERNAL_ERROR;
+    }
+    return Err::OK;
 }
 
 Err PrinterApp::hook_print_status(void*, JsonWriter& w) noexcept {
@@ -75,6 +99,34 @@ void PrinterApp::service_tick_task_(void* user) noexcept {
         self->tick_services_();
         vTaskDelay(pdMS_TO_TICKS(100));
     }
+    vTaskDeleteWithCaps(nullptr);
+}
+
+void PrinterApp::airprint_start_task_(void* user) noexcept {
+    auto* self = static_cast<PrinterApp*>(user);
+#if defined(IJPD_AIRPRINT_ENABLED)
+    char hostname[24] = {};
+    char lower[9] = {};
+    for (int i = 0; i < 6 && self->device_id_[5 + i]; ++i) {
+        lower[i] = static_cast<char>(tolower(self->device_id_[5 + i]));
+    }
+    snprintf(hostname, sizeof(hostname), "ijpd-%s", lower);
+    const Err result = self->airprint_probe_.start(
+        hostname, self->device_id_, self->airprint_capabilities_,
+        self->hal_bundle_.printhead, self->config_.airprint.accept_print_jobs);
+    if (result == Err::OK) {
+        self->airprint_started_ = true;
+        IJPD_LOGI(kTag, "AirPrint service started on TCP %u (print_jobs=%s)",
+                  static_cast<unsigned>(self->airprint_capabilities_.ipp_port),
+                  self->config_.airprint.accept_print_jobs ? "enabled" : "query-only");
+    } else {
+        IJPD_LOGE(kTag, "AirPrint service start failed: %s", err_name(result));
+    }
+    self->airprint_start_attempted_ = true;
+    self->airprint_start_queued_ = false;
+#else
+    (void)self;
+#endif
     vTaskDelete(nullptr);
 }
 
@@ -82,6 +134,7 @@ void PrinterApp::tick_services_() noexcept {
     if (config_.services.ble) ble_.poll();  // BLE 队列 -> 控制面
     if (config_.services.mqtt) mqtt_.poll();
     plane_.tick(task_layout::now_ms());
+    wifi_.process_pending_requests();
     PrintService::instance().tick();  // 任务超时看护
     wifi_.stop_portal_if_connected();  // Wi-Fi 连上后关配网门户
     // mDNS 惰性启动:网络栈(netif)就绪后 mdns_init 才能成功,
@@ -99,19 +152,20 @@ void PrinterApp::tick_services_() noexcept {
             mdns_started_ = true;
         }
     }
-    if (!mdns_ipp_started_ && config_.services.airprint && ipp_.started() &&
-        wifi_.connected()) {
-        char lower[9] = {0};
-        for (int i = 0; i < 6 && device_id_[5 + i]; ++i) {
-            lower[i] = static_cast<char>(tolower(device_id_[5 + i]));
-        }
-        char hostname[24];
-        snprintf(hostname, sizeof(hostname), "ijpd-%s", lower);
-        if (mdns_broadcast_ipp_start(hostname, device_id_, config_.device_model,
-                                     config_.airprint_port, config_.profile) == Err::OK) {
-            mdns_ipp_started_ = true;
+#if defined(IJPD_AIRPRINT_ENABLED)
+    if (!airprint_started_ && !airprint_start_queued_ &&
+        !airprint_start_attempted_ && config_.services.airprint && wifi_.connected()) {
+        airprint_start_queued_ = true;
+        const Err spawn_error = task_layout::spawn_with_caps(
+            "air_start", airprint_start_task_, this, 0,
+            task_layout::kPrioCtrl, task_layout::kStackAirPrint, MALLOC_CAP_SPIRAM);
+        if (spawn_error != Err::OK) {
+            airprint_start_queued_ = false;
+            airprint_start_attempted_ = true;
+            IJPD_LOGE(kTag, "AirPrint start task spawn failed: %s", err_name(spawn_error));
         }
     }
+#endif
 }
 
 void PrinterApp::tcp_channel_closed(void* user, int ch) noexcept {
@@ -160,6 +214,12 @@ bool PrinterApp::raw_accept(void* user, int fd, const char* peer) noexcept {
 // ---------------------------------------------------------------- 启动
 
 Err PrinterApp::start() noexcept {
+#if !defined(IJPD_AIRPRINT_ENABLED)
+    if (config_.services.airprint) {
+        IJPD_LOGW(kTag, "airprint ignored: rebuild with AIRPRINT_ENABLE=ON");
+        config_.services.airprint = false;
+    }
+#endif
     // 1) PSRAM 内存（失败不致命：打印能力保持关闭，控制通道照常工作）
     const Err me = mem_.init();
     if (me != Err::OK) {
@@ -172,6 +232,48 @@ Err PrinterApp::start() noexcept {
     snprintf(device_id_, sizeof(device_id_), "IJPD-%02X%02X%02X", mac[3], mac[4],
              mac[5]);
     // mDNS 广播推迟到 Wi-Fi 就绪后(tcp_tick 惰性启动,见 tcp_tick)
+#if defined(IJPD_AIRPRINT_ENABLED)
+    if (config_.services.airprint) {
+        char lower[9] = {};
+        for (int i = 0; i < 6 && device_id_[5 + i]; ++i) {
+            lower[i] = static_cast<char>(tolower(device_id_[5 + i]));
+        }
+        char hostname[24] = {};
+        snprintf(hostname, sizeof(hostname), "ijpd-%s.local", lower);
+        const int uri_length = snprintf(airprint_printer_uri_,
+                                        sizeof(airprint_printer_uri_),
+                                        "ipp://%s/ipp/print", hostname);
+        if (uri_length < 0 || static_cast<size_t>(uri_length) >= sizeof(airprint_printer_uri_)) {
+            return Err::INVALID_ARGUMENT;
+        }
+        const int info_length = snprintf(airprint_more_info_url_,
+                                         sizeof(airprint_more_info_url_),
+                                         "http://%s/", hostname);
+        if (info_length < 0 || static_cast<size_t>(info_length) >=
+                                    sizeof(airprint_more_info_url_)) {
+            return Err::INVALID_ARGUMENT;
+        }
+        airprint_capabilities_.enabled = true;
+        airprint_capabilities_.ipp_port = config_.airprint.port;
+        airprint_capabilities_.printer_uri = airprint_printer_uri_;
+        airprint_capabilities_.printer_more_info =
+            config_.airprint.printer_more_info != nullptr
+                ? config_.airprint.printer_more_info
+                : airprint_more_info_url_;
+        airprint_capabilities_.printer_name = config_.airprint.printer_name;
+        airprint_capabilities_.make_and_model = config_.airprint.make_and_model;
+        airprint_capabilities_.printer_info = config_.airprint.printer_info;
+        airprint_capabilities_.printer_location = config_.airprint.printer_location;
+        airprint_capabilities_.media_keyword = config_.airprint.media_keyword;
+        airprint_capabilities_.document_format = config_.airprint.document_format;
+        airprint_capabilities_.urf_supported = config_.airprint.urf_supported;
+        airprint_capabilities_.dpi_x = config_.airprint.dpi_x;
+        airprint_capabilities_.dpi_y = config_.airprint.dpi_y;
+        airprint_capabilities_.color_supported = config_.airprint.color_supported;
+        airprint_capabilities_.duplex_supported = config_.airprint.duplex_supported;
+        airprint_capabilities_.accepting_jobs = config_.airprint.accept_print_jobs;
+    }
+#endif
 
     if (config_.services.escpos_raw_tcp &&
         (config_.profile == nullptr ||
@@ -195,7 +297,6 @@ Err PrinterApp::start() noexcept {
     di_.escpos_raw_tcp_port = config_.services.escpos_raw_tcp
                                   ? config_.escpos_raw_tcp_port
                                   : 0;
-    di_.airprint_port = config_.services.airprint ? config_.airprint_port : 0;
 
     // 3) 打印编排服务（Mock HAL）
     const Err de = DisplayService::instance().start();
@@ -203,6 +304,8 @@ Err PrinterApp::start() noexcept {
         IJPD_LOGW(kTag, "display start failed (%s) - 打印不受影响", err_name(de));
     }
     PrintService& svc = PrintService::instance();
+    svc.set_profile(config_.profile);
+    svc.set_hal_bundle(hal_bundle_);
     svc.set_mqtt_context(config_.mqtt_base_topic, device_id_);
     const Err se = svc.start(&mem_, &plane_);
     if (se != Err::OK) {
@@ -218,6 +321,7 @@ Err PrinterApp::start() noexcept {
     CommandRouter::Hooks hooks;
     hooks.user = this;
     hooks.get_device_info = hook_device_info;
+    hooks.start_provisioning = hook_start_provisioning;
     hooks.get_print_status = hook_print_status;
     hooks.start_print = hook_start_print;
     hooks.cancel_print = hook_cancel_print;
@@ -301,23 +405,10 @@ Err PrinterApp::start() noexcept {
         plane_.set_sink(ControlPlane::kChannelMqtt, {this, mqtt_send});
     }
 
-    if (config_.services.airprint) {
-        IppServer::Host ipp_host;
-        ipp_host.user = this;
-        ipp_host.begin_page = PrintService::ipp_begin_page;
-        ipp_host.write_row = PrintService::ipp_write_row;
-        ipp_host.end_page = PrintService::ipp_end_page;
-        e = ipp_.start(config_.airprint_port, config_.device_model, config_.profile,
-                       ipp_host);
-        if (e != Err::OK) {
-            IJPD_LOGE(kTag, "IPP foundation start failed: %s", err_name(e));
-            return e;
-        }
-    }
-
     if (!config_.services.ijpd_tcp &&
         (config_.services.ble || config_.services.wifi ||
-         config_.services.escpos_raw_tcp || config_.services.mqtt)) {
+         config_.services.escpos_raw_tcp || config_.services.mqtt ||
+         config_.services.airprint)) {
         service_tick_running_ = true;
         e = task_layout::spawn("app_tick", service_tick_task_, this, 0,
                                task_layout::kPrioCtrl, 3072);

@@ -63,7 +63,7 @@ int main() {
         CHECK_TRUE(p.find(p.root(), "nope") == JsonParser::kNone);
     }
 
-    // 完整 start_print 请求示例（protocol_v1.md §4.3）
+    // 完整 start_print 请求示例（docs/protocols/ijpd-control.md）
     {
         const char* req =
             R"({"msg_id":"job-create-001","cmd":"start_print","data":{)"

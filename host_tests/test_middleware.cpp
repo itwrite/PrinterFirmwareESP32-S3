@@ -14,6 +14,7 @@
 #include "core/print_profile.h"
 #include "core/print_pipeline.h"
 #include "profiles/inkjet_6in.h"
+#include "profiles/ricoh_mh5440_mock.h"
 #include "profiles/thermal_58mm.h"
 
 using namespace ijpd;
@@ -75,6 +76,16 @@ int main() {
         p.total_rows = 10;
         CHECK_TRUE(CommandRouter::finalize_start_print(
                        &p, &profiles::kInkjet6in, &msg) == Err::OK);
+
+        StartPrintParams ricoh = p;
+        ricoh.bytes_per_row = 1280;
+        ricoh.total_rows = 2;
+        ricoh.total_bytes_uncompressed = 2560;
+        CHECK_TRUE(profiles::kRicohMh5440Mock.validate() == Err::OK);
+        CHECK_TRUE(CommandRouter::finalize_start_print(
+                       &ricoh, &profiles::kRicohMh5440Mock, &msg) == Err::OK);
+        CHECK_EQ(profiles::kRicohMh5440Mock.print_width_px, 320u);
+        CHECK_EQ(profiles::kRicohMh5440Mock.effective_bpr_max(4), 1280u);
 
         // escpos 模式：热敏支持，喷墨拒绝
         p.mode = StartPrintMode::EscPos;

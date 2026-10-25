@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """send_job.py —— 控制+数据双通道模拟客户端（仅 Python 标准库，Phase 6）
 
-流程（协议 docs/protocol_v1.md）：
+流程（协议 docs/protocols/ijpd-control.md 与 docs/protocols/ijpd-data-tcp.md）：
   1. TCP 控制（9100）：发送 start_print，解析 data_token / nominal_packet_bytes
   2. TCP 数据（9101）：Hello 握手 + 分包发送（LZ4/存储兜底/CRC32）
   3. select 双向：边发数据边收 print_progress / print_finished 事件
@@ -34,9 +34,8 @@ def ctrl_send(sock, msg_id, cmd, data):
     sock.sendall(frame.encode())
 
 
-def ctrl_recv(sock, timeout=2.0):
+def ctrl_recv(sock, timeout=2.0, buf=b""):
     """读取一条 '#' 结尾的响应(跳过空帧/残留定界符)。"""
-    buf = b""
     end = time.time() + timeout
     while time.time() < end:
         while b"#" in buf:
@@ -76,6 +75,7 @@ def main() -> int:
     ap.add_argument("--break-after", type=int, default=0)
     ap.add_argument("--never-connect", action="store_true")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--quiet-progress", action="store_true")
     args = ap.parse_args()
 
     rng = random.Random(args.seed)
@@ -102,7 +102,7 @@ def main() -> int:
         "total_rows": rows,
         "cutter_after_finish": False,
     })
-    resp, _ = ctrl_recv(ctrl, 5.0)
+    resp, ctrl_buf = ctrl_recv(ctrl, 5.0)
     if resp is None:
         print("ERROR: 无 start_print 响应")
         return 1
@@ -116,7 +116,7 @@ def main() -> int:
 
     if args.never_connect:
         print("等待数据连接超时事件（10s）...")
-        ev, _ = ctrl_recv(ctrl, 12.0)
+        ev, ctrl_buf = ctrl_recv(ctrl, 12.0, ctrl_buf)
         print("event:", json.dumps(ev, ensure_ascii=False) if ev else "None")
         ctrl.close()
         return 0
@@ -143,12 +143,24 @@ def main() -> int:
     break_done = False
     cancel_sent = False
     t0 = time.time()
+    send_done_at = None
     final = None
 
     while True:
         rlist, wlist, _ = select.select([ctrl], [data] if pending else [], [], 0.05)
         if wlist and pending:
-            n = data.send(pending[:4096])
+            try:
+                n = data.send(pending[:4096])
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                # Cancellation/fatal-error paths intentionally close the data
+                # socket before the client has drained its pending frames.
+                print(f"data connection closed by device: {exc}")
+                pending = b""
+                try:
+                    data.close()
+                except OSError:
+                    pass
+                continue
             pending = pending[n:]
             sent = sum(len(f) for f in frames) - len(pending)
             # 粗略包计数（按已发送字节推进）
@@ -165,18 +177,23 @@ def main() -> int:
                     data.close()
                     pending = b""
         if rlist:
-            ev, _ = ctrl_recv(ctrl, 1.0)
+            ev, ctrl_buf = ctrl_recv(ctrl, 1.0, ctrl_buf)
             if ev:
                 cmd = ev.get("cmd")
                 if cmd == "print_progress":
                     s = ev["data"]["result"]
-                    print(f"progress: rx={s['packets_received']} "
-                          f"dec={s['packets_decoded']} wm={s['queue_watermark']} "
-                          f"{s['throughput_bps']}B/s")
+                    if not args.quiet_progress:
+                        print(f"progress: rx={s['packets_received']} "
+                              f"dec={s['packets_decoded']} wm={s['queue_watermark']} "
+                              f"{s['throughput_bps']}B/s")
                 elif cmd == "print_finished":
                     final = ev
                     break
         if not pending and data.fileno() >= 0 and not final:
+            if send_done_at is None:
+                send_done_at = time.time()
+                print(f"send_complete: {send_done_at - t0:.3f}s, "
+                      f"wire_rate={total / max(send_done_at - t0, 0.001) / 1000:.0f}KB/s")
             # 发送完毕：等待终态事件（最多 15s）
             if time.time() - t0 > 30:
                 print("TIMEOUT: 等待 print_finished")

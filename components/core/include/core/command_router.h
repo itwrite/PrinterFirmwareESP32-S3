@@ -91,6 +91,7 @@ public:
     struct Hooks {
         void* user = nullptr;
         Err (*get_device_info)(void* user, JsonWriter& w) = nullptr;
+        Err (*start_provisioning)(void* user, JsonWriter& w) = nullptr;
         Err (*start_print)(void* user, const StartPrintParams& p, JsonWriter& w) = nullptr;
         Err (*cancel_print)(void* user, const CancelPrintParams& p, JsonWriter& w) = nullptr;
         Err (*get_print_status)(void* user, JsonWriter& w) = nullptr;

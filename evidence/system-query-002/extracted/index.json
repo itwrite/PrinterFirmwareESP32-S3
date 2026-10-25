@@ -1,0 +1,207 @@
+[
+  {
+    "artifacts": {
+      "document": {
+        "bytes": 707738,
+        "path": "flow-01.document.bin",
+        "sha256": "842b0654bf29e8106391ceae9b3783799d1aeaf5a16f109433856fc0a0817457"
+      },
+      "ipp_body": {
+        "bytes": 709543,
+        "path": "flow-01.body.ipp",
+        "sha256": "2f3b6dce7107adfbb9caeb5e3f2d5c57cb0ea2616ace7d5cd375faa83a433c6f"
+      },
+      "request_http": {
+        "bytes": 710219,
+        "path": "flow-01.request.http",
+        "sha256": "29014907632216977e3b3ba0107b1336ccd2df174d84e8af7ef36d42f7d2d3bf"
+      },
+      "response_http": {
+        "bytes": 222,
+        "path": "flow-01.response.http",
+        "sha256": "d86aa5b95596c84bb9351966c7af598dd44379d27f13ef9a6f694252714f3029"
+      }
+    },
+    "chunked": true,
+    "client": {
+      "address": "172.20.10.2",
+      "port": 61470
+    },
+    "document_bytes": 707738,
+    "document_offset": 1805,
+    "http_request_line": "POST /ipp/print HTTP/1.1",
+    "http_transfer_encoding": "chunked",
+    "ipp_body_bytes": 709543,
+    "ipp_operation": 2,
+    "metadata": "flow-01.metadata.json",
+    "server": {
+      "address": "172.20.10.3",
+      "port": 631
+    },
+    "source_pcap": "evidence/system-query-002/airprint-printjob.pcap"
+  },
+  {
+    "artifacts": {
+      "document": {
+        "bytes": 707738,
+        "path": "flow-02.document.bin",
+        "sha256": "842b0654bf29e8106391ceae9b3783799d1aeaf5a16f109433856fc0a0817457"
+      },
+      "ipp_body": {
+        "bytes": 709543,
+        "path": "flow-02.body.ipp",
+        "sha256": "2f3b6dce7107adfbb9caeb5e3f2d5c57cb0ea2616ace7d5cd375faa83a433c6f"
+      },
+      "request_http": {
+        "bytes": 710205,
+        "path": "flow-02.request.http",
+        "sha256": "74c1020c92966c41cdb502b50617d86447d725413fa2663af5453e0ad5c88b13"
+      },
+      "response_http": {
+        "bytes": 222,
+        "path": "flow-02.response.http",
+        "sha256": "d86aa5b95596c84bb9351966c7af598dd44379d27f13ef9a6f694252714f3029"
+      }
+    },
+    "chunked": true,
+    "client": {
+      "address": "172.20.10.2",
+      "port": 61485
+    },
+    "document_bytes": 707738,
+    "document_offset": 1805,
+    "http_request_line": "POST /ipp/print HTTP/1.1",
+    "http_transfer_encoding": "chunked",
+    "ipp_body_bytes": 709543,
+    "ipp_operation": 2,
+    "metadata": "flow-02.metadata.json",
+    "server": {
+      "address": "172.20.10.3",
+      "port": 631
+    },
+    "source_pcap": "evidence/system-query-002/airprint-printjob.pcap"
+  },
+  {
+    "artifacts": {
+      "document": {
+        "bytes": 707738,
+        "path": "flow-03.document.bin",
+        "sha256": "842b0654bf29e8106391ceae9b3783799d1aeaf5a16f109433856fc0a0817457"
+      },
+      "ipp_body": {
+        "bytes": 709543,
+        "path": "flow-03.body.ipp",
+        "sha256": "2f3b6dce7107adfbb9caeb5e3f2d5c57cb0ea2616ace7d5cd375faa83a433c6f"
+      },
+      "request_http": {
+        "bytes": 710225,
+        "path": "flow-03.request.http",
+        "sha256": "d8ccc997286003042b5e033df86a9509b6e3e2b535cf42705ccd09e898ed1b8b"
+      },
+      "response_http": {
+        "bytes": 222,
+        "path": "flow-03.response.http",
+        "sha256": "d86aa5b95596c84bb9351966c7af598dd44379d27f13ef9a6f694252714f3029"
+      }
+    },
+    "chunked": true,
+    "client": {
+      "address": "172.20.10.2",
+      "port": 61499
+    },
+    "document_bytes": 707738,
+    "document_offset": 1805,
+    "http_request_line": "POST /ipp/print HTTP/1.1",
+    "http_transfer_encoding": "chunked",
+    "ipp_body_bytes": 709543,
+    "ipp_operation": 2,
+    "metadata": "flow-03.metadata.json",
+    "server": {
+      "address": "172.20.10.3",
+      "port": 631
+    },
+    "source_pcap": "evidence/system-query-002/airprint-printjob.pcap"
+  },
+  {
+    "artifacts": {
+      "document": {
+        "bytes": 722531,
+        "path": "flow-04.document.bin",
+        "sha256": "23f5bb488d04f7f969ea89dbfa02d54ee1b9f1cdcd5cdc3657b12c8c3b07ca09"
+      },
+      "ipp_body": {
+        "bytes": 724336,
+        "path": "flow-04.body.ipp",
+        "sha256": "4ad34d840e100025bcd9ed32ab2e2be9cb2919e763e0aece33639d7011fe61df"
+      },
+      "request_http": {
+        "bytes": 725048,
+        "path": "flow-04.request.http",
+        "sha256": "aedea9c712ef683c0c9b7d5421c55cb40d3a26d8c09d7c34895e1609c657a59d"
+      },
+      "response_http": {
+        "bytes": 222,
+        "path": "flow-04.response.http",
+        "sha256": "d86aa5b95596c84bb9351966c7af598dd44379d27f13ef9a6f694252714f3029"
+      }
+    },
+    "chunked": true,
+    "client": {
+      "address": "172.20.10.2",
+      "port": 61528
+    },
+    "document_bytes": 722531,
+    "document_offset": 1805,
+    "http_request_line": "POST /ipp/print HTTP/1.1",
+    "http_transfer_encoding": "chunked",
+    "ipp_body_bytes": 724336,
+    "ipp_operation": 2,
+    "metadata": "flow-04.metadata.json",
+    "server": {
+      "address": "172.20.10.3",
+      "port": 631
+    },
+    "source_pcap": "evidence/system-query-002/airprint-printjob.pcap"
+  },
+  {
+    "artifacts": {
+      "document": {
+        "bytes": 722531,
+        "path": "flow-05.document.bin",
+        "sha256": "23f5bb488d04f7f969ea89dbfa02d54ee1b9f1cdcd5cdc3657b12c8c3b07ca09"
+      },
+      "ipp_body": {
+        "bytes": 724336,
+        "path": "flow-05.body.ipp",
+        "sha256": "4ad34d840e100025bcd9ed32ab2e2be9cb2919e763e0aece33639d7011fe61df"
+      },
+      "request_http": {
+        "bytes": 725040,
+        "path": "flow-05.request.http",
+        "sha256": "ca86da9b0d898558fbb8e2cd38480aa5f8732e013fbd2bf997d3261af3eb2212"
+      },
+      "response_http": {
+        "bytes": 222,
+        "path": "flow-05.response.http",
+        "sha256": "d86aa5b95596c84bb9351966c7af598dd44379d27f13ef9a6f694252714f3029"
+      }
+    },
+    "chunked": true,
+    "client": {
+      "address": "172.20.10.2",
+      "port": 61542
+    },
+    "document_bytes": 722531,
+    "document_offset": 1805,
+    "http_request_line": "POST /ipp/print HTTP/1.1",
+    "http_transfer_encoding": "chunked",
+    "ipp_body_bytes": 724336,
+    "ipp_operation": 2,
+    "metadata": "flow-05.metadata.json",
+    "server": {
+      "address": "172.20.10.3",
+      "port": 631
+    },
+    "source_pcap": "evidence/system-query-002/airprint-printjob.pcap"
+  }
+]

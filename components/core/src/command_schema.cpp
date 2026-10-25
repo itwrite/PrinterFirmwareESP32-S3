@@ -114,6 +114,8 @@ constexpr ParamSpec kFeedPaperParams[] = {
 constexpr CommandSpec kCommands[] = {
     {"get_device_info", "获取设备信息",
      "查询设备、能力、限制与命令元数据", nullptr, 0},
+    {"start_provisioning", "开始配网",
+     "切换到 SoftAP 配网门户；活动打印任务期间不可用", nullptr, 0},
     {"start_print", "开始打印",
      "创建打印任务并初始化有界缓存", kStartPrintParams,
      static_cast<uint8_t>(sizeof(kStartPrintParams) / sizeof(kStartPrintParams[0]))},

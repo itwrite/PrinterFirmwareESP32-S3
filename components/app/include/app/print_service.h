@@ -24,14 +24,23 @@
 #include "core/command_router.h"
 #include "core/crc32.h"
 #include "core/mqtt_chunk_protocol.h"
-#include "core/pwg_raster.h"
 #include "core/print_pipeline.h"
 #include "printer_hal/cutter_hal.h"
 #include "printer_hal/printhead_hal.h"
+#include "printer_hal/sensor_hal.h"
 #include "printer_hal/stepper_hal.h"
 #include "platform_esp/psram_allocator.h"
 
 namespace ijpd {
+
+// Non-owning HAL bundle. PrinterApp owns the concrete implementations and must
+// keep them alive for the lifetime of PrintService.
+struct PrinterHalBundle {
+    IPrintheadHal* printhead = nullptr;
+    IStepperHal* stepper = nullptr;
+    ICutterHal* cutter = nullptr;
+    ISensorHal* sensors = nullptr;
+};
 
 class PrintService {
 public:
@@ -39,6 +48,11 @@ public:
 
     // 创建任务与常驻资源（PSRAM 行缓冲等）
     Err start(PlatformMemory* mem, ControlPlane* plane) noexcept;
+
+    // Inject non-owning hardware implementations before start(). Null entries
+    // retain the built-in Mock implementation for that subsystem.
+    void set_hal_bundle(const PrinterHalBundle& bundle) noexcept;
+    void set_profile(const PrintProfile* profile) noexcept { profile_ = profile; }
 
     // ctrl 空闲钩子（100ms 周期）：超时看护 + 数据连接清理
     void tick() noexcept;
@@ -48,16 +62,13 @@ public:
     static bool raw_accept(void* user, int fd, const char* peer) noexcept;
     static void mqtt_chunk(void* user, const uint8_t* data, size_t len) noexcept;
     static void mqtt_disconnected(void* user) noexcept;
-    static Err ipp_begin_page(void* user, const PwgRasterPage& page) noexcept;
-    static Err ipp_write_row(void* user, const uint8_t* row, size_t len,
-                             uint32_t row_index) noexcept;
-    static Err ipp_end_page(void* user, Err status) noexcept;
 
     void set_mqtt_context(const char* base_topic, const char* device_id) noexcept;
 
     // Router 钩子
     static Err hook_start_print(void* user, const StartPrintParams& p,
                                 JsonWriter& w) noexcept;
+    bool has_active_job() const noexcept;
     static Err hook_cancel_print(void* user, const CancelPrintParams& p,
                                  JsonWriter& w) noexcept;
     static Err hook_print_status(void* user, JsonWriter& w) noexcept;
@@ -99,6 +110,12 @@ private:
     MockPrintheadHal printhead_{&mock_delay, nullptr};
     MockStepperHal stepper_{&mock_delay, nullptr};
     MockCutterHal cutter_{};
+    MockSensorHal sensors_{};
+    IPrintheadHal* printhead_hal_ = &printhead_;
+    IStepperHal* stepper_hal_ = &stepper_;
+    ICutterHal* cutter_hal_ = &cutter_;
+    ISensorHal* sensors_hal_ = &sensors_;
+    const PrintProfile* profile_ = nullptr;
 
     PlatformMemory* mem_ = nullptr;
     ControlPlane* plane_ = nullptr;
@@ -128,9 +145,6 @@ private:
     MqttChunkSequence mqtt_sequence_{};
     char mqtt_base_topic_[128] = {};
     char mqtt_device_id_[32] = {};
-    void* ipp_done_sem_ = nullptr;  // SemaphoreHandle_t
-    volatile bool ipp_active_ = false;
-    volatile Err ipp_result_ = Err::OK;
     // 图片指纹（端到端校验）：print 任务写，report 任务读
     volatile uint32_t fp_state_ = CRC32_INIT_STATE;
     volatile uint32_t fp_bytes_ = 0;

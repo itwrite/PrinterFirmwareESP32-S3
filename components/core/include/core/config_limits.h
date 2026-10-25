@@ -1,7 +1,7 @@
 // ============================================================================
 // config_limits.h —— 全部容量上限/端口/超时集中定义（Phase 1）
 //
-// 定稿依据：docs/protocol_v1.md §8、docs/memory_budget.md。
+// 定稿依据：docs/protocols/ijpd-data-tcp.md、docs/memory_budget.md。
 // 修改本文件属于协议/资源变更，必须同步修订上述文档并升级版本。
 //
 // 线程安全性：纯 constexpr 常量，线程安全。

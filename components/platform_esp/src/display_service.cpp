@@ -69,6 +69,11 @@ struct DisplayService::Impl {
     uint16_t* fb = nullptr;
     bool job_active = false;
     uint32_t w_px = 0, h_px = 0, bits = 1, planes = 1, bpr = 0;
+    bool interleaved = false;
+    uint32_t bytes_per_pixel = 1;
+    uint32_t physical_width_um = 0;
+    uint32_t dpi = 0;
+    bool page_cache_enabled = false;
     uint8_t* page = nullptr;
     volatile uint32_t rows_seen = 0;
     uint32_t total_rows = 0;
@@ -182,18 +187,23 @@ Err DisplayService::start() noexcept {
 }
 
 Err DisplayService::begin_job(uint32_t w_px, uint32_t h_px, uint32_t bits,
-                              uint32_t planes, uint32_t bpr,
-                              const RasterChannel* channel_order,
-                              uint32_t channel_order_count) noexcept {
+                               uint32_t planes, uint32_t bpr,
+                               const RasterChannel* channel_order,
+                               uint32_t channel_order_count,
+                               bool interleaved,
+                               uint32_t bytes_per_pixel,
+                               uint32_t physical_width_um,
+                               uint32_t dpi) noexcept {
     if (!started_ || !impl_) return Err::UNSUPPORTED;
     end_job();
     if (bits != 1 && bits != 8) bits = 1;
     if (!planes) planes = 1;
-    if (bpr > kPageCapBpr || h_px > kPageCapRows || planes > kPageCapPlanes) {
-        IJPD_LOGW(kTag, "job exceeds page cache, display skip");
+    if (h_px > kPageCapRows || planes > kPageCapPlanes || bytes_per_pixel == 0) {
+        IJPD_LOGW(kTag, "job exceeds preview geometry, display skip");
         return Err::UNSUPPORTED;
     }
-    if (!impl_->page) {
+    impl_->page_cache_enabled = bpr <= kPageCapBpr;
+    if (impl_->page_cache_enabled && !impl_->page) {
         impl_->page = static_cast<uint8_t*>(heap_caps_malloc(
             size_t(kPageCapBpr) * kPageCapRows * kPageCapPlanes, MALLOC_CAP_SPIRAM));
         if (!impl_->page) { IJPD_LOGW(kTag, "page alloc failed"); return Err::OUT_OF_MEMORY; }
@@ -208,7 +218,7 @@ Err DisplayService::begin_job(uint32_t w_px, uint32_t h_px, uint32_t bits,
             return Err::OUT_OF_MEMORY;
         }
     }
-    if (bpr < impl_->cap_bpr) {
+    if (impl_->page_cache_enabled && bpr < impl_->cap_bpr) {
         for (uint32_t r = 0; r < h_px * planes; ++r) {
             std::memset(impl_->page + size_t(r) * impl_->cap_bpr, 0xFF, bpr);
             std::memset(impl_->page + size_t(r) * impl_->cap_bpr + bpr, 0x00, impl_->cap_bpr - bpr);
@@ -216,7 +226,12 @@ Err DisplayService::begin_job(uint32_t w_px, uint32_t h_px, uint32_t bits,
     }
     impl_->w_px = w_px; impl_->h_px = h_px; impl_->bits = bits;
     impl_->planes = planes; impl_->bpr = bpr;
-    impl_->rows_seen = 0; impl_->total_rows = h_px * planes;
+    impl_->interleaved = interleaved;
+    impl_->bytes_per_pixel = bytes_per_pixel;
+    impl_->physical_width_um = physical_width_um;
+    impl_->dpi = dpi;
+    impl_->rows_seen = 0;
+    impl_->total_rows = interleaved ? h_px : h_px * planes;
     impl_->final_render_pending = false;
     std::memset(impl_->preview_acc, 0,
                 size_t(kPreviewPlanes) * kLcdH * kLcdW * sizeof(uint16_t));
@@ -224,12 +239,20 @@ Err DisplayService::begin_job(uint32_t w_px, uint32_t h_px, uint32_t bits,
     for (uint32_t y = 0; y < kLcdH; ++y) impl_->preview_revision[y] = 1;
     std::memset(impl_->preview_drawn_revision, 0,
                 sizeof(impl_->preview_drawn_revision));
-    if (uint64_t(w_px) * kLcdH >= uint64_t(h_px) * kLcdW) {
+    const uint64_t physical_w = physical_width_um != 0
+                                    ? physical_width_um
+                                    : (dpi != 0
+                                           ? uint64_t(w_px) * 25400u / dpi
+                                           : uint64_t(w_px));
+    const uint64_t physical_h = dpi != 0
+                                    ? uint64_t(h_px) * 25400u / dpi
+                                    : uint64_t(h_px);
+    if (physical_w * kLcdH >= physical_h * kLcdW) {
         impl_->view_w = kLcdW;
-        impl_->view_h = static_cast<uint32_t>(uint64_t(h_px) * kLcdW / w_px);
+        impl_->view_h = static_cast<uint32_t>(physical_h * kLcdW / physical_w);
     } else {
         impl_->view_h = kLcdH;
-        impl_->view_w = static_cast<uint32_t>(uint64_t(w_px) * kLcdH / h_px);
+        impl_->view_w = static_cast<uint32_t>(physical_w * kLcdH / physical_h);
     }
     if (impl_->view_w == 0) impl_->view_w = 1;
     if (impl_->view_h == 0) impl_->view_h = 1;
@@ -245,58 +268,79 @@ Err DisplayService::begin_job(uint32_t w_px, uint32_t h_px, uint32_t bits,
         impl_->channel_order_count = count;
     }
     impl_->job_active = true;
-    IJPD_LOGI(kTag, "job %lux%lu %lub %lup", static_cast<unsigned long>(w_px),
+    IJPD_LOGI(kTag, "job %lux%lu %lub %lup layout=%s width_um=%lu cache=%s",
+              static_cast<unsigned long>(w_px),
               static_cast<unsigned long>(h_px), static_cast<unsigned long>(bits),
-              static_cast<unsigned long>(planes));
+              static_cast<unsigned long>(planes), interleaved ? "interleaved" : "planar",
+              static_cast<unsigned long>(physical_width_um),
+              impl_->page_cache_enabled ? "full" : "preview-only");
     return Err::OK;
 }
 
 void DisplayService::feed_row(uint32_t idx, const uint8_t* data, size_t len) noexcept {
-    if (!started_ || !impl_ || !impl_->job_active || !impl_->page) return;
+    if (!started_ || !impl_ || !impl_->job_active || !impl_->preview_acc) return;
     if (idx >= impl_->total_rows) return;
-    size_t off = size_t(idx) * impl_->cap_bpr;
-    size_t n = len < impl_->bpr ? len : impl_->bpr;
+    if (impl_->page_cache_enabled && impl_->page) {
+        const size_t off = size_t(idx) * impl_->cap_bpr;
+        const size_t n = len < impl_->bpr ? len : impl_->bpr;
+        std::memcpy(impl_->page + off, data, n);
+    }
     // 无锁写:310B memcpy 亚微秒;rows_seen 32位对齐原子写。
     // FreeRTOS 互斥锁跨核使用时优先级继承簿记可触发
     // xTaskPriorityDisinherit 断言 → 整机崩溃(实测复现),不可接受。
     // 撕裂读对预览显示无视觉影响,数据完整性由逐包 CRC 保证。
-    std::memcpy(impl_->page + off, data, n);
     impl_->rows_seen = idx + 1;
 
     const uint32_t plane_height = impl_->h_px;
-    const uint32_t plane = idx / plane_height;
-    const uint32_t source_y = idx % plane_height;
-    if (plane >= kPreviewPlanes) return;
+    const uint32_t source_y = impl_->interleaved ? idx : idx % plane_height;
+    const uint32_t first_plane = impl_->interleaved ? 0 : idx / plane_height;
     const uint32_t display_y = impl_->view_y + static_cast<uint32_t>(
         uint64_t(source_y) * impl_->view_h / plane_height);
     if (display_y >= kLcdH) return;
-
-    uint16_t* sums = impl_->preview_acc +
-        (size_t(plane) * kLcdH + display_y) * kLcdW;
-    for (uint32_t display_x = 0; display_x < impl_->view_w; ++display_x) {
-        const uint32_t x0 = uint32_t(uint64_t(display_x) * impl_->w_px / impl_->view_w);
-        uint32_t x1 = uint32_t(uint64_t(display_x + 1) * impl_->w_px / impl_->view_w);
-        if (x1 <= x0) x1 = x0 + 1;
-        if (x1 > impl_->w_px) x1 = impl_->w_px;
-        uint32_t sum = 0;
-        for (uint32_t x = x0; x < x1; ++x) {
-            if (impl_->bits == 8) {
-                sum += data[x];
-            } else {
-                const uint8_t bit = (data[x >> 3] >> (7 - (x & 7))) & 1u;
-                sum += bit == kInkBitLevel ? kBitCoverage : 0u;
+    const uint32_t plane_count = impl_->interleaved ? impl_->planes : 1;
+    for (uint32_t plane = first_plane; plane < first_plane + plane_count &&
+                                      plane < kPreviewPlanes; ++plane) {
+        uint16_t* sums = impl_->preview_acc +
+            (size_t(plane) * kLcdH + display_y) * kLcdW;
+        for (uint32_t display_x = 0; display_x < impl_->view_w; ++display_x) {
+            const uint32_t x0 = uint32_t(uint64_t(display_x) * impl_->w_px / impl_->view_w);
+            uint32_t x1 = uint32_t(uint64_t(display_x + 1) * impl_->w_px / impl_->view_w);
+            if (x1 <= x0) x1 = x0 + 1;
+            if (x1 > impl_->w_px) x1 = impl_->w_px;
+            uint32_t sum = 0;
+            for (uint32_t x = x0; x < x1; ++x) {
+                const uint32_t offset = impl_->interleaved
+                                            ? x * impl_->bytes_per_pixel + plane
+                                            : x;
+                if (impl_->bits == 8) {
+                    if (offset < len) sum += data[offset];
+                } else {
+                    const uint8_t bit = (data[offset >> 3] >> (7 - (offset & 7))) & 1u;
+                    sum += bit == kInkBitLevel ? kBitCoverage : 0u;
+                }
             }
+            sums[impl_->view_x + display_x] = static_cast<uint16_t>(
+                sums[impl_->view_x + display_x] + sum / (x1 - x0));
         }
-        sums[impl_->view_x + display_x] = static_cast<uint16_t>(
-            sums[impl_->view_x + display_x] + sum / (x1 - x0));
+        impl_->preview_counts[plane * kLcdH + display_y]++;
     }
-    impl_->preview_counts[plane * kLcdH + display_y]++;
     const uint32_t revision = impl_->preview_revision[display_y];
     impl_->preview_revision[display_y] = revision + 1;
 }
 
+void DisplayService::store_row(uint32_t idx, const uint8_t* data, size_t len) noexcept {
+    if (!started_ || !impl_ || !impl_->job_active || data == nullptr ||
+        idx >= impl_->total_rows) return;
+    if (impl_->page_cache_enabled && impl_->page) {
+        const size_t off = size_t(idx) * impl_->cap_bpr;
+        const size_t n = len < impl_->bpr ? len : impl_->bpr;
+        std::memcpy(impl_->page + off, data, n);
+    }
+    impl_->rows_seen = idx + 1;
+}
+
 const uint8_t* DisplayService::peek_row(uint32_t idx) const noexcept {
-    if (!impl_ || !impl_->page) return nullptr;
+    if (!impl_ || !impl_->page || !impl_->page_cache_enabled) return nullptr;
     if (idx >= impl_->total_rows) return nullptr;
     return impl_->page + size_t(idx) * impl_->cap_bpr;
 }
@@ -304,7 +348,7 @@ const uint8_t* DisplayService::peek_row(uint32_t idx) const noexcept {
 void DisplayService::end_job() noexcept {
     if (!impl_) return;
     impl_->job_active = false;
-    impl_->final_render_pending = impl_->page != nullptr;
+    impl_->final_render_pending = impl_->preview_acc != nullptr;
 }
 
 // ---- 渲染 ----
@@ -388,7 +432,7 @@ void DisplayService::render_preview_row_(uint32_t display_row) noexcept {
 }
 
 void DisplayService::render_incremental_() noexcept {
-    if (!impl_ || !impl_->page || !impl_->preview_acc ||
+    if (!impl_ || !impl_->preview_acc ||
         (!impl_->job_active && !impl_->final_render_pending)) return;
 
     uint32_t display_row = 0;

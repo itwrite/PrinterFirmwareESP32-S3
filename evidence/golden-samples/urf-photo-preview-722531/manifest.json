@@ -1,0 +1,47 @@
+{
+  "artifacts": {
+    "analysis": {
+      "bytes": 1769,
+      "path": "analysis.json",
+      "sha256": "7de7ecbbbb167521c786b6c8ebf458aa17c1b97ef922bbf21814d402adb86455"
+    },
+    "capture_metadata": {
+      "bytes": 1118,
+      "path": "capture_metadata.json",
+      "sha256": "4d5147cb5068947059ac0538cca1a26e2fa84de34836333770469f8f420fb29c"
+    },
+    "document": {
+      "bytes": 722531,
+      "path": "document.bin",
+      "sha256": "23f5bb488d04f7f969ea89dbfa02d54ee1b9f1cdcd5cdc3657b12c8c3b07ca09"
+    },
+    "http_capture": {
+      "bytes": 725048,
+      "path": "http_capture.bin",
+      "sha256": "aedea9c712ef683c0c9b7d5421c55cb40d3a26d8c09d7c34895e1609c657a59d"
+    },
+    "ipp_attributes": {
+      "bytes": 1118,
+      "path": "ipp_attributes.bin",
+      "sha256": "4d5147cb5068947059ac0538cca1a26e2fa84de34836333770469f8f420fb29c"
+    },
+    "ipp_body": {
+      "bytes": 724336,
+      "path": "ipp_body.bin",
+      "sha256": "4ad34d840e100025bcd9ed32ab2e2be9cb2919e763e0aece33639d7011fe61df"
+    },
+    "pcap": {
+      "bytes": 4077375,
+      "path": "capture.pcap",
+      "sha256": "f4f9a6cd438b6acc11f774132294f903b2ae4dea637c228e2e75e76d20e8e612"
+    }
+  },
+  "document_bytes": 722531,
+  "document_format": "image/urf",
+  "document_offset": 1805,
+  "expected_values_known": false,
+  "ipp_body_bytes": 724336,
+  "manifest_version": 1,
+  "sample_name": "urf-photo-preview-722531",
+  "sha256": "4ad34d840e100025bcd9ed32ab2e2be9cb2919e763e0aece33639d7011fe61df"
+}

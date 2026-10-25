@@ -28,10 +28,18 @@ public:
     Err begin_job(uint32_t width_px, uint32_t height_px, uint32_t bits,
                   uint32_t planes, uint32_t bytes_per_row,
                   const RasterChannel* channel_order = nullptr,
-                  uint32_t channel_order_count = 0) noexcept;
+                  uint32_t channel_order_count = 0,
+                  bool interleaved = false,
+                  uint32_t bytes_per_pixel = 1,
+                  uint32_t physical_width_um = 0,
+                  uint32_t dpi = 0) noexcept;
 
     // 打印行到达(单写者:print 任务)。非活动任务时为空操作。
     void feed_row(uint32_t row_index, const uint8_t* data, size_t len) noexcept;
+
+    // Store a row without advancing the visible preview. Used when transport
+    // reception is decoupled from the printhead consumer.
+    void store_row(uint32_t row_index, const uint8_t* data, size_t len) noexcept;
 
     // 只读访问页缓存中的某行(页缓存常驻,任务期内有效);越界返回 nullptr。
     const uint8_t* peek_row(uint32_t row_index) const noexcept;
