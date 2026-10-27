@@ -88,6 +88,10 @@ public:
         // escpos 模式：按块转发原始流（返回非 OK -> 致命 HAL_FAULT）
         Err (*print_raw)(void* user, const uint8_t* data, size_t len) = nullptr;
         void (*on_event)(void* user, const Event& ev) = nullptr;
+        // Optional transport callbacks appended to preserve legacy aggregate
+        // initialization of Os in existing hosts and tests.
+        void (*on_hello)(void* user) = nullptr;
+        void (*on_packet)(void* user, uint16_t packet_index) = nullptr;
     };
 
     enum class Pump : uint8_t { Progress, WouldBlock, Done, Failed };

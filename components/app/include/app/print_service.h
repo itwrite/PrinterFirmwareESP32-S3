@@ -21,6 +21,7 @@
 
 #include "app/control_plane.h"
 #include "core/bin_frame_parser.h"
+#include "core/ble_data_protocol.h"
 #include "core/command_router.h"
 #include "core/crc32.h"
 #include "core/mqtt_chunk_protocol.h"
@@ -69,6 +70,11 @@ public:
     static Err hook_start_print(void* user, const StartPrintParams& p,
                                 JsonWriter& w) noexcept;
     bool has_active_job() const noexcept;
+    using BleHelloAckFn = Err (*)(void* user, uint32_t token, uint16_t packet_bytes);
+    using BlePacketAckFn = Err (*)(void* user, uint16_t packet_index);
+    void set_ble_data_callbacks(void* user, BleHelloAckFn hello_ack,
+                                BlePacketAckFn packet_ack) noexcept;
+    static Err ble_data_packet(void* user, const uint8_t* data, size_t len) noexcept;
     static Err hook_cancel_print(void* user, const CancelPrintParams& p,
                                  JsonWriter& w) noexcept;
     static Err hook_print_status(void* user, JsonWriter& w) noexcept;
@@ -85,6 +91,14 @@ private:
                             uint32_t row_index) noexcept;
     static void os_on_event(void* user, const PrintPipeline::Event& ev) noexcept;
     static void mock_delay(void* user, uint32_t ms) noexcept;
+    static void os_on_hello(void* user) noexcept;
+    static void os_on_packet(void* user, uint16_t packet_index) noexcept;
+    Err ble_data_packet_(const uint8_t* data, size_t len) noexcept;
+    void* ble_ack_user_ = nullptr;
+    BleHelloAckFn ble_hello_ack_ = nullptr;
+    BlePacketAckFn ble_packet_ack_ = nullptr;
+    bool ble_transport_ = false;
+    uint16_t ble_packet_bytes_ = 0;
 
     void enqueue_event_(const PrintPipeline::Event& ev) noexcept;
     static void bfp_hello_cb_(void* user) noexcept;
@@ -167,6 +181,12 @@ private:
     uint32_t data_token_ = 0;
     bool cutter_after_finish_ = false;
     volatile uint32_t event_seq_ = 0;
+    uint64_t last_stall_log_ms_ = 0;  // 接收停顿诊断日志节流
+    uint64_t rx_dbg_total_ = 0;       // 本次任务累计接收字节（诊断）
+    uint64_t last_rx_seen_bytes_ = 0;
+    uint32_t last_rx_seen_ms_ = 0;    // tick 任务上次观察到 RX 字节推进的时刻
+    uint64_t rx_stall_log_ms_ = 0;    // buffered RX 停顿诊断节流
+    bool rx_dbg_first_ = false;       // 首包诊断日志标志
     void* event_queue_ = nullptr;  // QueueHandle_t
     volatile bool running_ = false;
 };

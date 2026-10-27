@@ -142,11 +142,26 @@ sock.sendall(frame_without_crc + crc)
 
 ## 8. 当前默认镜像限制
 
-默认固件使用 `RICOH-MH5440-MOCK` Profile，报告逻辑 `CMYK8` raster 能力：
-`320 px/channel`、`1280 bytes/row`、参考 `600 dpi`。这些是逻辑 Mock 契约，
+默认固件使用 `RICOH-MH5440-MOCK` Profile，报告 A4 logical `CMYK8` raster 能力：
+`2480×3508 px`、`9920 bytes/row`、参考 `300 dpi`。这些是逻辑 Mock 契约，
 不是已确认的真实喷头电气规格；客户端仍应读取 `get_device_info`，不要据此推断
 真实波形、电压、连接器或喷嘴时序。
 
-当前推荐路径是 `mode:"raster"` + TCP `9101`。`mode:"escpos"` 虽出现在
+当前推荐路径是 `mode:"raster"` + TCP `9101`。A4 logical Mock 的完整一页约为
+`2480×3508×4 = 34.8 MiB`，发送端应使用 TCP 路径和 LZ4/CRC32；BLE Phase 1
+的 `512 KiB` 上限只适合小测试任务。`mode:"escpos"` 虽出现在
 schema 中，但默认镜像不提供可用的 IJPD ESC/POS 流水线；原始 ESC/POS 请使用
 独立 RAW TCP 协议。
+
+## 9. BLE 备用数据传输
+
+无 Wi-Fi 时可使用 IJPD BLE Service 的 Data Write/Data ACK 特征：
+
+```json
+{"cmd":"start_print","data":{"transport":"ble","compression":"none","integrity":"crc32"}}
+```
+
+Phase 1 限制：最大任务 `512 KiB`、logical packet `1024 bytes`、单连接单任务、
+逐 packet ACK、断开后重新开始。当前实现要求 `compression:"none"` 且
+`integrity:"crc32"`。BLE 复用本协议的 IJPD Hello、6-byte packet header、payload
+和 CRC32，但不提供 TCP socket、断点续传或多物理链路并发。

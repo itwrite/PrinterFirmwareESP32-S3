@@ -52,6 +52,36 @@ bool PrintService::has_active_job() const noexcept {
            close_req_ || raw_close_req_;
 }
 
+void PrintService::set_ble_data_callbacks(void* user, BleHelloAckFn hello_ack,
+                                          BlePacketAckFn packet_ack) noexcept {
+    ble_ack_user_ = user;
+    ble_hello_ack_ = hello_ack;
+    ble_packet_ack_ = packet_ack;
+}
+
+Err PrintService::ble_data_packet(void* user, const uint8_t* data, size_t len) noexcept {
+    return static_cast<PrintService*>(user)->ble_data_packet_(data, len);
+}
+
+Err PrintService::ble_data_packet_(const uint8_t* data, size_t len) noexcept {
+    if (!ble_transport_ || data == nullptr || len == 0 || !pipeline_.active()) {
+        return Err::DATA_CONNECTION_LOST;
+    }
+    last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
+    size_t offset = 0;
+    while (offset < len) {
+        size_t consumed = 0;
+        const PrintPipeline::Pump result = pipeline_.rx_pump(
+            data + offset, len - offset, &consumed);
+        offset += consumed;
+        if (result == PrintPipeline::Pump::Failed) return pipeline_.last_error();
+        if (result == PrintPipeline::Pump::WouldBlock && consumed == 0) {
+            return Err::QUEUE_TIMEOUT;
+        }
+    }
+    return Err::OK;
+}
+
 void PrintService::set_hal_bundle(const PrinterHalBundle& bundle) noexcept {
     if (running_ || pipeline_.active() || buffered_ || raw_active_) return;
     printhead_hal_ = bundle.printhead != nullptr ? bundle.printhead : &printhead_;
@@ -77,6 +107,19 @@ void PrintService::set_mqtt_context(const char* base_topic, const char* device_i
 
 void PrintService::mock_delay(void*, uint32_t ms) noexcept {
     vTaskDelay(pdMS_TO_TICKS(ms));
+}
+
+void PrintService::os_on_hello(void* user) noexcept {
+    auto* self = static_cast<PrintService*>(user);
+    if (!self->ble_transport_ || self->ble_hello_ack_ == nullptr) return;
+    (void)self->ble_hello_ack_(self->ble_ack_user_, self->data_token_,
+                               self->ble_packet_bytes_);
+}
+
+void PrintService::os_on_packet(void* user, uint16_t packet_index) noexcept {
+    auto* self = static_cast<PrintService*>(user);
+    if (!self->ble_transport_ || self->ble_packet_ack_ == nullptr) return;
+    (void)self->ble_packet_ack_(self->ble_ack_user_, packet_index);
 }
 
 uint64_t PrintService::os_now_ms(void*) noexcept { return task_layout::now_ms(); }
@@ -254,6 +297,7 @@ Err PrintService::start(PlatformMemory* mem, ControlPlane* plane) noexcept {
 Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
                                    JsonWriter& w) noexcept {
     auto* self = static_cast<PrintService*>(user);
+    self->ble_transport_ = false;
     if (self->pipeline_.active() || self->raw_active_) {
         return Err::JOB_ALREADY_RUNNING;
     }
@@ -294,6 +338,23 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     cfg.compression = p.compression;
     cfg.integrity = p.integrity;
     cfg.data_mode = p.mode;
+    self->ble_transport_ = p.transport == StartPrintTransport::Ble;
+    if (self->ble_transport_) {
+        if (self->ble_ack_user_ == nullptr || self->ble_hello_ack_ == nullptr ||
+            self->ble_packet_ack_ == nullptr) {
+            self->ble_transport_ = false;
+            return Err::UNSUPPORTED;
+        }
+        self->ble_packet_bytes_ = static_cast<uint16_t>(
+            p.nominal_packet_bytes > ble_data::kLogicalPacketBytes
+                ? ble_data::kLogicalPacketBytes
+                : p.nominal_packet_bytes);
+        if (p.mode != StartPrintMode::Raster || p.compression != Compression::None ||
+            p.integrity != Integrity::Crc32 ||
+            p.nominal_packet_bytes != self->ble_packet_bytes_) {
+            return Err::INVALID_ARGUMENT;
+        }
+    }
     cfg.raw_chunk_bytes = 512;  // escpos 转发块（Profile 细化后由 profile 提供）
     for (size_t i = 0; i < cfg::COMPRESSED_BUF_COUNT; ++i) {
         cfg.comp_buf[i] = self->mem_->comp[i];
@@ -329,7 +390,7 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
         d_planes <= 4 && p.bytes_per_row <= 384 &&
         display_rows <= 4000 && (cmyk8_interleaved || p.total_rows % d_planes == 0);
     self->buffered_ =
-        fits_page && DisplayService::instance().begin_job(
+        p.transport != StartPrintTransport::Ble && fits_page && DisplayService::instance().begin_job(
                           d_width, display_rows, d_bits, d_planes,
                           p.bytes_per_row, display_order, display_order_count,
                           cmyk8_interleaved, display_bpp, display_width_um,
@@ -374,9 +435,11 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     os.user = self;
     os.now_ms = os_now_ms;
     os.print_row = os_print_row;
+    os.on_hello = os_on_hello;
+    os.on_packet = os_on_packet;
     os.on_event = os_on_event;
 
-    PrintheadConfig ph{p.bytes_per_row, 2000, 0};  // Mock: 2000 行/秒
+    PrintheadConfig ph{p.bytes_per_row, 10000, 0};  // Mock: 1ms tick floor
     (void)self->printhead_hal_->begin(ph);
 
     if (!self->buffered_) {
@@ -396,12 +459,20 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     self->fp_state_ = CRC32_INIT_STATE;
     self->fp_bytes_ = 0;
     self->last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
+    self->rx_dbg_total_ = 0;
+    self->rx_dbg_first_ = false;
+    self->last_stall_log_ms_ = 0;
+    self->last_rx_seen_ms_ = task_layout::now_ms();
+    self->last_rx_seen_bytes_ = 0;
+    self->rx_stall_log_ms_ = 0;
 
     // 响应（协议 §4.3）
     if (!w.begin_object()) return Err::INTERNAL_ERROR;
     if (!w.kv_cstr("job_id", p.job_id)) return Err::INTERNAL_ERROR;
-    if (!w.kv_cstr("status", self->mqtt_transport_ ? "waiting_mqtt_chunks"
-                                                     : "waiting_data_conn")) {
+    if (!w.kv_cstr("status", self->mqtt_transport_
+                                 ? "waiting_mqtt_chunks"
+                                 : self->ble_transport_ ? "waiting_ble_data"
+                                                        : "waiting_data_conn")) {
         return Err::INTERNAL_ERROR;
     }
     if (self->mqtt_transport_) {
@@ -412,6 +483,12 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
                                self->mqtt_base_topic_, self->mqtt_device_id_, self->job_id_);
         if (n <= 0 || static_cast<size_t>(n) >= sizeof(topic) ||
             !w.kv_cstr("mqtt_chunk_topic", topic)) return Err::INTERNAL_ERROR;
+    } else if (self->ble_transport_) {
+        if (!w.kv_cstr("transport", "ble") ||
+            !w.kv_i64("ble_packet_bytes", self->ble_packet_bytes_) ||
+            !w.kv_i64("ble_window_packets", ble_data::kWindowPackets)) {
+            return Err::INTERNAL_ERROR;
+        }
     } else if (!w.kv_i64("data_port", cfg::DATA_TCP_PORT)) {
         return Err::INTERNAL_ERROR;
     }
@@ -763,7 +840,7 @@ void PrintService::buffered_print_step_() noexcept {
             return;
         }
         buf_rows_printed_++;
-        // 打印相进度:每 256 行(约 1.3s @200rps)广播一次
+        // 打印进度事件:每 256 行(约 1.3s @200rps)广播一次
         if ((buf_rows_printed_ & 0xFF) == 0) {
             PrintPipeline::Event ev{};
             ev.kind = PrintPipeline::Event::Kind::Progress;
@@ -877,6 +954,31 @@ void PrintService::check_timeouts_(uint64_t now) noexcept {
         // 多核读序:last_rx 可能被 rx 任务(另一核)更新到比 now 更晚。
         // 先读 last_rx 再取 now,now < last 视为"刚收到"跳过(不下溢)。
         const uint32_t last = last_rx_ms_;
+        const uint64_t rx_total = rx_dbg_total_;
+        if (rx_total != 0 && rx_total != last_rx_seen_bytes_) {
+            last_rx_seen_bytes_ = rx_total;
+            last_rx_seen_ms_ = now;
+        }
+        const uint64_t idle = now >= last_rx_seen_ms_ ? now - last_rx_seen_ms_ : 0;
+        if (buf_receiving_ && rx_total == 0 &&
+            now - rx_stall_log_ms_ >= 2000) {
+            rx_stall_log_ms_ = now;
+            IJPD_LOGI(kTag, "buffered waiting: idle=%llums rx_bytes=%llu",
+                      static_cast<unsigned long long>(now - started),
+                      static_cast<unsigned long long>(rx_total));
+        }
+        if (buf_receiving_ && idle >= 3000 &&
+            now - rx_stall_log_ms_ >= 2000) {
+            rx_stall_log_ms_ = now;
+            IJPD_LOGW(kTag, "buffered stall: idle=%llums rx_bytes=%u packets=%u "
+                            "rows_stored=%u rows_printed=%u dram_free=%u",
+                      static_cast<unsigned long long>(now - last),
+                      static_cast<unsigned>(buf_recv_bytes_),
+                      static_cast<unsigned>(buf_pkts_),
+                      static_cast<unsigned>(buf_rows_stored_),
+                      static_cast<unsigned>(buf_rows_printed_),
+                      static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+        }
         if (buf_receiving_ && now >= last &&
             now - last >= cfg::PACKET_IDLE_TIMEOUT_MS) {
             IJPD_LOGW(kTag, "buffered rx idle timeout: now=%llu last_rx=%u "
@@ -905,8 +1007,17 @@ void PrintService::check_timeouts_(uint64_t now) noexcept {
         IJPD_LOGW(kTag, "data connect timeout");
         pipeline_.fail(Err::JOB_TIMEOUT);
     } else if (st == JobState::Receiving &&
+               pipeline_.rx_should_read() &&
+               now32 >= last_rx_ms_ &&  // rx 任务(另一核)刚刷新 last 时 now 快照滞后，防下溢误判
                now32 - last_rx_ms_ >= static_cast<uint32_t>(cfg::PACKET_IDLE_TIMEOUT_MS)) {
-        IJPD_LOGW(kTag, "packet idle timeout");
+        // 设备主动背压（rx_should_read()==false，槽池/压缩缓冲满）时不应计时：
+        // 传输限速是正常流控，不是断流。缓冲腾出后窗口恢复，last_rx_ms_ 随之
+        // 刷新；若流水线卡死，JOB_TOTAL_TIMEOUT_MS 仍兜底。
+        IJPD_LOGW(kTag, "packet idle timeout: st=%d rx_read=%d last=%u now=%u "
+                        "rxdbg=%llu",
+                  static_cast<int>(st), pipeline_.rx_should_read() ? 1 : 0,
+                  static_cast<unsigned>(last_rx_ms_), static_cast<unsigned>(now32),
+                  static_cast<unsigned long long>(rx_dbg_total_));
         pipeline_.fail(Err::JOB_TIMEOUT);
         request_close_data_();
     } else if (pipeline_.active() &&
@@ -924,13 +1035,40 @@ void PrintService::check_timeouts_(uint64_t now) noexcept {
 void PrintService::tick() noexcept {
     if (!running_) return;
     check_timeouts_(task_layout::now_ms());
+    // 接收停顿诊断：>3s 没有新字节时每 2s 打印一次流水线水位，
+    // 用于区分“App 侧停发”vs“槽池/解码卡死”两类卡顿。
+    const JobState st = pipeline_.state();
+    if (st == JobState::Receiving) {
+        const uint64_t now = task_layout::now_ms();
+        const uint32_t last = last_rx_ms_;
+        const uint64_t idle = now >= last ? now - last : 0;
+        if (idle >= 3000 && now - last_stall_log_ms_ >= 2000) {
+            last_stall_log_ms_ = now;
+            const auto s = pipeline_.snapshot();
+            IJPD_LOGW(kTag, "stall? idle=%ums rx_read=%d slots_free=%d "
+                            "rx=%u dec=%u printed=%u bytes=%llu wm=%u dram_free=%u",
+                      static_cast<unsigned>(idle),
+                      pipeline_.rx_should_read() ? 1 : 0,
+                      pipeline_.all_slots_free() ? 1 : 0,
+                      static_cast<unsigned>(s.packets_received),
+                      static_cast<unsigned>(s.packets_decoded),
+                      static_cast<unsigned>(s.bytes_printed),
+                      static_cast<unsigned long long>(s.bytes_decoded),
+                      static_cast<unsigned>(s.queue_watermark),
+                      static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+        }
+    } else {
+        last_stall_log_ms_ = 0;
+    }
 }
 
 // ---------------------------------------------------------------- 任务
 
 void PrintService::rx_task_(void* arg) noexcept {
     auto* self = static_cast<PrintService*>(arg);
-    uint8_t buf[1024];
+    // Larger recv blocks reduce lwIP/socket call overhead during streaming.
+    // The RX task is unique, so a static buffer avoids consuming its small stack.
+    static uint8_t buf[8192];
     while (self->running_) {
         // 关闭请求优先处理（本任务是 fd 唯一属主；fd<0 时仅清除标志）
         if (self->close_req_) {
@@ -984,6 +1122,18 @@ void PrintService::rx_task_(void* arg) noexcept {
         const ssize_t n = lwip_recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
         if (n > 0) {
             self->last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
+            if (!self->rx_dbg_first_) {
+                self->rx_dbg_first_ = true;
+                IJPD_LOGI(kTag, "tcp rx first bytes n=%d st=%d", static_cast<int>(n),
+                          static_cast<int>(self->pipeline_.state()));
+            }
+            self->rx_dbg_total_ += static_cast<uint64_t>(n);
+            if (self->rx_dbg_total_ / (4 * 1024 * 1024) !=
+                (self->rx_dbg_total_ - static_cast<uint64_t>(n)) / (4 * 1024 * 1024)) {
+                IJPD_LOGI(kTag, "tcp rx %llu MB st=%d",
+                          static_cast<unsigned long long>(self->rx_dbg_total_ / (1024 * 1024)),
+                          static_cast<int>(self->pipeline_.state()));
+            }
             if (self->buffered_) {
                 // 页缓存直通:帧校验(Hello/CRC/顺序/长度)+行落缓存,无背压。
                 // 粘包协议要求:每帧派发后重挂载荷缓冲再继续喂
@@ -1064,7 +1214,7 @@ void PrintService::print_task_(void* arg) noexcept {
     while (self->running_) {
         if (self->buf_printing_) {
             self->buffered_print_step_();
-            vTaskDelay(pdMS_TO_TICKS(2));
+            vTaskDelay(pdMS_TO_TICKS(1));
             continue;
         }
         const auto r = self->pipeline_.print_pump();

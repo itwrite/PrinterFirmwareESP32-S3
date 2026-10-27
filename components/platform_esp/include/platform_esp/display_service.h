@@ -53,6 +53,7 @@ private:
     void render_preview_row_(uint32_t display_row) noexcept;
     void render_incremental_() noexcept;
     void render_frame_() noexcept;
+    void release_job_buffers_() noexcept;
 
     struct Impl;
     Impl* impl_ = nullptr;

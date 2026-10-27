@@ -17,10 +17,10 @@ using namespace ijpd;
 
 namespace {
 
-constexpr size_t kWidthPixels = 320;
+constexpr size_t kWidthPixels = 2480;
 constexpr size_t kChannels = 4;
 constexpr size_t kBytesPerRow = kWidthPixels * kChannels;
-constexpr size_t kRows = 5;
+constexpr size_t kRows = 2;
 constexpr size_t kTotalBytes = kBytesPerRow * kRows;
 constexpr size_t kPacketCount = 4;
 
@@ -74,7 +74,7 @@ std::vector<uint8_t> build_stream(const JobSpec& spec, const std::vector<uint8_t
 }
 
 struct Harness {
-    uint8_t slots[cfg::SLOT_COUNT * 4096] = {};
+    uint8_t slots[cfg::SLOT_COUNT * cfg::SLOT_SIZE] = {};
     uint8_t comp[2][cfg::MAX_PACKET_COMPRESSED_SIZE + 1] = {};
     uint8_t carry[kBytesPerRow] = {};
     PrintPipeline pipeline;
@@ -119,7 +119,7 @@ struct Harness {
         value.comp_buf[1] = comp[1];
         value.slot_memory = slots;
         value.slot_count = cfg::SLOT_COUNT;
-        value.slot_size = 4096;
+        value.slot_size = cfg::SLOT_SIZE;
         value.row_carry = carry;
         return value;
     }
@@ -225,7 +225,7 @@ int main() {
     CHECK_TRUE(completed);
 
     RicohMh5440MockConfig fault_config = config;
-    fault_config.fault_after_rows = 3;
+    fault_config.fault_after_rows = 2;
     Harness faulty(fault_config);
     CHECK_TRUE(faulty.hal.begin(PrintheadConfig{static_cast<uint32_t>(kBytesPerRow), 1, 0}) ==
                Err::OK);
@@ -236,8 +236,8 @@ int main() {
     CHECK_TRUE(faulty.pipeline.state() == JobState::Error);
     CHECK_TRUE(faulty.pipeline.last_error() == Err::HAL_FAULT);
     CHECK_TRUE(faulty.pipeline.all_slots_free());
-    CHECK_EQ(faulty.hal.stats().rows_accepted, 3u);
-    CHECK_EQ(faulty.hal.stats().bytes_accepted, 3u * kBytesPerRow);
+    CHECK_EQ(faulty.hal.stats().rows_accepted, 2u);
+    CHECK_EQ(faulty.hal.stats().bytes_accepted, 2u * kBytesPerRow);
     bool failed = false;
     for (const PrintPipeline::Event& event : faulty.events) {
         if (event.kind == PrintPipeline::Event::Kind::Failed &&

@@ -30,7 +30,7 @@ BLE         enabled, device name IJPD-Printer
 IJPD TCP    enabled, control 9100, data 9101
 RAW TCP     disabled
 MQTT        disabled
-Profile     RICOH-MH5440-MOCK, CMYK8 raster, 320 px/channel, 1280 bytes/row
+Profile     RICOH-MH5440-MOCK, A4 logical CMYK8 raster, 2480×3508 @ 300 DPI, 9920 bytes/row
 Model       RICOH-MH5440-MOCK
 Firmware    0.3.0
 ```

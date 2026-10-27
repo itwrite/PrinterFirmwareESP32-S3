@@ -23,6 +23,8 @@ public:
     Err request_provisioning() noexcept;  // 延迟到当前控制响应发送后切换
     void process_pending_requests() noexcept;
     bool connected() const noexcept { return connected_; }
+    // SoftAP 配网门户是否在运行（手机直连打印机热点即此模式）
+    bool portal_active() const noexcept { return portal_active_; }
     ~WifiManager();
 
     // STA 连接成功后调用（关闭配网门户）

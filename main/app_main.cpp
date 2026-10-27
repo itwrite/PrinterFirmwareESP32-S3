@@ -20,7 +20,7 @@ extern "C" void app_main(void) {
     static constexpr const char* kTag = "main";
     IJPD_LOGI(kTag, "IJPD printer firmware starting");
 
-    // Default image: logical RICOH MH5440 CMYK8 Mock. Unlisted transports stay off.
+    // Default image: A4 logical RICOH MH5440 CMYK8 Mock. Unlisted transports stay off.
     static ijpd::RicohMh5440MockConfig mock_config{};
 #if defined(IJPD_AIRPRINT_ENABLED)
     // AirPrint is a logical Mock path; do not make the client wait for the
@@ -54,9 +54,9 @@ extern "C" void app_main(void) {
             .printer_location = "Lab",
             .media_keyword = "iso_a4_210x297mm",
             .document_format = "image/urf",
-            .urf_supported = "V1.4,CP1,RS600,W8,SRGB24,DM1,IS1,MT1,FN3",
-            .dpi_x = 600,
-            .dpi_y = 600,
+            .urf_supported = "V1.4,CP1,RS300,W8,SRGB24,DM1,IS1,MT1,FN3",
+            .dpi_x = 300,
+            .dpi_y = 300,
             .color_supported = true,
             .duplex_supported = false,
         },

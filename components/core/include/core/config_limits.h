@@ -24,6 +24,9 @@ inline constexpr uint16_t MAX_CTRL_TCP_CONNS = 2;     // TCP 控制连接上限
 // ---------------- BLE ----------------
 inline constexpr uint16_t BLE_MTU_TARGET       = 247;  // MTU 协商目标
 inline constexpr uint16_t BLE_MIN_NOTIFY_CHUNK = 20;   // 分片下限（MTU-3 最小值）
+inline constexpr uint16_t BLE_DATA_PACKET_BYTES = 1024;
+inline constexpr uint8_t BLE_DATA_WINDOW_PACKETS = 4;
+inline constexpr uint64_t BLE_MAX_JOB_BYTES = 512ull * 1024;
 
 // ---------------- 控制帧 ----------------
 inline constexpr char    FRAME_TERMINATOR      = '#';              // 控制帧结束符
@@ -57,7 +60,7 @@ inline constexpr size_t LOW_WATERMARK  = 2;  // 回落则恢复读取（滞回�
 
 // ---------------- 超时 ----------------
 inline constexpr uint32_t DATA_CONNECT_TIMEOUT_MS = 10000;    // start_print 后等待数据连接握手
-inline constexpr uint32_t PACKET_IDLE_TIMEOUT_MS  = 15000;    // 数据包间空闲(高 RTT/拥塞 Wi-Fi 下 5s 过紧)
+inline constexpr uint32_t PACKET_IDLE_TIMEOUT_MS  = 60000;    // SoftAP 丢包/重传期间允许 60s 暂停
 inline constexpr uint32_t JOB_TOTAL_TIMEOUT_MS    = 600000;   // 任务总超时
 
 // ---------------- 进度事件 ----------------

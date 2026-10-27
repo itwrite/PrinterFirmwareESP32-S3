@@ -25,21 +25,29 @@ namespace ijpd {
 namespace {
 
 constexpr const char* kTag = "ble_ctl";
+constexpr uint32_t kNotifyRetryTimeoutMs = 5000;
+constexpr uint32_t kNotifyRetryDelayMs = 10;
 
 // UUID（NimBLE 要求小端字节序）：5a8f00XX-7c2b-4d6e-9a01-3f5e8d7c2b01
 // 字符串 "5a8f0001-7c2b-4d6e-9a01-3f5e8d7c2b01" 按字节反转即下述数组
 constexpr uint8_t kSvcUuidLe[16] = {0x01, 0x2b, 0x7c, 0x8d, 0x5e, 0x3f, 0x01, 0x9a,
                                     0x6e, 0x4d, 0x2b, 0x7c, 0x01, 0x00, 0x8f, 0x5a};
-constexpr uint8_t kWriteUuidLe[16] = {0x02, 0x2b, 0x7c, 0x8d, 0x5e, 0x3f, 0x01, 0x9a,
-                                      0x6e, 0x4d, 0x2b, 0x7c, 0x01, 0x00, 0x8f, 0x5a};
-constexpr uint8_t kNotifyUuidLe[16] = {0x03, 0x2b, 0x7c, 0x8d, 0x5e, 0x3f, 0x01, 0x9a,
-                                       0x6e, 0x4d, 0x2b, 0x7c, 0x01, 0x00, 0x8f, 0x5a};
+constexpr uint8_t kWriteUuidLe[16] = {0x01, 0x2b, 0x7c, 0x8d, 0x5e, 0x3f, 0x01, 0x9a,
+                                      0x6e, 0x4d, 0x2b, 0x7c, 0x02, 0x00, 0x8f, 0x5a};
+constexpr uint8_t kNotifyUuidLe[16] = {0x01, 0x2b, 0x7c, 0x8d, 0x5e, 0x3f, 0x01, 0x9a,
+                                        0x6e, 0x4d, 0x2b, 0x7c, 0x03, 0x00, 0x8f, 0x5a};
+constexpr uint8_t kDataWriteUuidLe[16] = {0x01, 0x2b, 0x7c, 0x8d, 0x5e, 0x3f, 0x01, 0x9a,
+                                          0x6e, 0x4d, 0x2b, 0x7c, 0x04, 0x00, 0x8f, 0x5a};
+constexpr uint8_t kDataAckUuidLe[16] = {0x01, 0x2b, 0x7c, 0x8d, 0x5e, 0x3f, 0x01, 0x9a,
+                                        0x6e, 0x4d, 0x2b, 0x7c, 0x05, 0x00, 0x8f, 0x5a};
 
 BleControlServer* g_self = nullptr;  // NimBLE sync/reset 回调无上下文
 
 ble_uuid128_t g_svc_uuid;
 ble_uuid128_t g_write_uuid;
 ble_uuid128_t g_notify_uuid;
+ble_uuid128_t g_data_write_uuid;
+ble_uuid128_t g_data_ack_uuid;
 
 }  // namespace
 
@@ -91,6 +99,7 @@ int BleControlServer::gap_event_cb_(struct ble_gap_event* event, void* arg) noex
             if (event->connect.status == 0) {
                 self->conn_handle_ = event->connect.conn_handle;
                 self->notify_enabled_ = false;
+                self->data_ack_enabled_ = false;
                 self->mtu_ = BLE_ATT_MTU_DFLT;  // 协商前默认；等待中心发起交换
                 IJPD_LOGI(kTag, "connected handle=%u",
                           static_cast<unsigned>(self->conn_handle_));
@@ -102,6 +111,7 @@ int BleControlServer::gap_event_cb_(struct ble_gap_event* event, void* arg) noex
             IJPD_LOGI(kTag, "disconnected reason=%d", event->disconnect.reason);
             self->conn_handle_ = -1;
             self->notify_enabled_ = false;
+            self->data_ack_enabled_ = false;
             start_advertising_();
             return 0;
         case BLE_GAP_EVENT_MTU:
@@ -113,6 +123,10 @@ int BleControlServer::gap_event_cb_(struct ble_gap_event* event, void* arg) noex
                 self->notify_enabled_ = event->subscribe.cur_notify != 0;
                 IJPD_LOGI(kTag, "notify %s",
                           self->notify_enabled_ ? "enabled" : "disabled");
+            } else if (event->subscribe.attr_handle == self->chr_data_ack_handle_) {
+                self->data_ack_enabled_ = event->subscribe.cur_notify != 0;
+                IJPD_LOGI(kTag, "data ack notify %s",
+                          self->data_ack_enabled_ ? "enabled" : "disabled");
             }
             return 0;
         default:
@@ -138,7 +152,37 @@ int BleControlServer::gatt_write_cb_(uint16_t conn, uint16_t attr,
     msg.len = copied;
 
     if (xQueueSendToBack(static_cast<QueueHandle_t>(self->queue_), &msg, 0) != pdTRUE) {
-        self->dropped_rx_.fetch_add(1, std::memory_order_relaxed);  // 热路径不打印
+        self->dropped_rx_.fetch_add(1, std::memory_order_relaxed);
+        IJPD_LOGW(kTag, "control rx queue full len=%u", static_cast<unsigned>(msg.len));
+        return BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+    IJPD_LOGI(kTag, "control write len=%u", static_cast<unsigned>(msg.len));
+    return 0;
+}
+
+int BleControlServer::gatt_data_write_cb_(uint16_t conn, uint16_t attr,
+                                          ble_gatt_access_ctxt* ctxt,
+                                          void* arg) noexcept {
+    (void)conn;
+    (void)attr;
+    (void)arg;
+    if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return 0;
+    BleControlServer* self = g_self;
+    if (self == nullptr || self->data_queue_ == nullptr) {
+        return BLE_ATT_ERR_UNLIKELY;
+    }
+    RxMsg msg{};
+    const uint16_t length = OS_MBUF_PKTLEN(ctxt->om);
+    if (length == 0 || length > sizeof(msg.buf)) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    uint8_t data[sizeof(msg.buf)] = {};
+    uint16_t copied = 0;
+    const int rc = ble_hs_mbuf_to_flat(ctxt->om, data, sizeof(data), &copied);
+    if (rc != 0) return BLE_ATT_ERR_UNLIKELY;
+    msg.len = copied;
+    std::memcpy(msg.buf, data, copied);
+    if (xQueueSendToBack(static_cast<QueueHandle_t>(self->data_queue_), &msg, 0) != pdTRUE) {
+        self->dropped_rx_.fetch_add(1, std::memory_order_relaxed);
+        return BLE_ATT_ERR_INSUFFICIENT_RES;
     }
     return 0;
 }
@@ -186,12 +230,18 @@ Err BleControlServer::start(const char* device_name, const Host& host) noexcept 
     memcpy(g_svc_uuid.value, kSvcUuidLe, 16);
     memcpy(g_write_uuid.value, kWriteUuidLe, 16);
     memcpy(g_notify_uuid.value, kNotifyUuidLe, 16);
+    memcpy(g_data_write_uuid.value, kDataWriteUuidLe, 16);
+    memcpy(g_data_ack_uuid.value, kDataAckUuidLe, 16);
     g_svc_uuid.u.type = BLE_UUID_TYPE_128;
     g_write_uuid.u.type = BLE_UUID_TYPE_128;
     g_notify_uuid.u.type = BLE_UUID_TYPE_128;
+    g_data_write_uuid.u.type = BLE_UUID_TYPE_128;
+    g_data_ack_uuid.u.type = BLE_UUID_TYPE_128;
 
     queue_ = xQueueCreate(8, sizeof(RxMsg));
     if (queue_ == nullptr) return Err::OUT_OF_MEMORY;
+    data_queue_ = xQueueCreate(24, sizeof(RxMsg));
+    if (data_queue_ == nullptr) return Err::OUT_OF_MEMORY;
 
     tx_lock_ = xSemaphoreCreateMutex();
     if (tx_lock_ == nullptr) return Err::OUT_OF_MEMORY;
@@ -206,7 +256,7 @@ Err BleControlServer::start(const char* device_name, const Host& host) noexcept 
     ble_svc_gap_device_name_set(device_name);
 
     // GATT 服务表（静态定义，避免 C++ 复合字面量）
-    static struct ble_gatt_chr_def chr_defs[3];
+    static struct ble_gatt_chr_def chr_defs[5];
     memset(chr_defs, 0, sizeof(chr_defs));
     chr_defs[0].uuid = &g_write_uuid.u;
     chr_defs[0].access_cb = &BleControlServer::gatt_write_cb_;
@@ -216,6 +266,14 @@ Err BleControlServer::start(const char* device_name, const Host& host) noexcept 
     chr_defs[1].access_cb = &BleControlServer::gatt_read_cb_;
     chr_defs[1].flags = BLE_GATT_CHR_F_NOTIFY;
     chr_defs[1].val_handle = &chr_notify_handle_;
+    chr_defs[2].uuid = &g_data_write_uuid.u;
+    chr_defs[2].access_cb = &BleControlServer::gatt_data_write_cb_;
+    chr_defs[2].flags = BLE_GATT_CHR_F_WRITE_NO_RSP;
+    chr_defs[2].val_handle = &chr_data_write_handle_;
+    chr_defs[3].uuid = &g_data_ack_uuid.u;
+    chr_defs[3].access_cb = &BleControlServer::gatt_read_cb_;
+    chr_defs[3].flags = BLE_GATT_CHR_F_NOTIFY;
+    chr_defs[3].val_handle = &chr_data_ack_handle_;
 
     static struct ble_gatt_svc_def svc_defs[2];
     memset(svc_defs, 0, sizeof(svc_defs));
@@ -238,6 +296,18 @@ Err BleControlServer::start(const char* device_name, const Host& host) noexcept 
     return Err::OK;
 }
 
+Err BleControlServer::sendDataHelloAck(uint32_t token, uint16_t packet_bytes) noexcept {
+    uint8_t data[ble_data::kHeaderBytes + 8] = {};
+    const size_t length = ble_data::make_hello_ack(data, sizeof(data), token, packet_bytes);
+    return send_on_handle_(chr_data_ack_handle_, data, length);
+}
+
+Err BleControlServer::sendDataPacketAck(uint16_t packet_index) noexcept {
+    uint8_t data[ble_data::kHeaderBytes + 4] = {};
+    const size_t length = ble_data::make_packet_ack(data, sizeof(data), packet_index);
+    return send_on_handle_(chr_data_ack_handle_, data, length);
+}
+
 void BleControlServer::stop() noexcept {
     if (g_self == this) g_self = nullptr;
     conn_handle_ = -1;
@@ -245,19 +315,34 @@ void BleControlServer::stop() noexcept {
         vQueueDelete(static_cast<QueueHandle_t>(queue_));
         queue_ = nullptr;
     }
+    if (data_queue_ != nullptr) {
+        vQueueDelete(static_cast<QueueHandle_t>(data_queue_));
+        data_queue_ = nullptr;
+    }
 }
 
 void BleControlServer::poll() noexcept {
     if (queue_ == nullptr) return;
     RxMsg msg;
     while (xQueueReceive(static_cast<QueueHandle_t>(queue_), &msg, 0) == pdTRUE) {
+        IJPD_LOGI(kTag, "control poll len=%u", static_cast<unsigned>(msg.len));
         host_.feed(host_.user, msg.buf, msg.len);
+    }
+    if (data_queue_ != nullptr && host_.data_packet != nullptr) {
+        while (xQueueReceive(static_cast<QueueHandle_t>(data_queue_), &msg, 0) == pdTRUE) {
+            (void)host_.data_packet(host_.user, msg.buf, msg.len);
+        }
     }
 }
 
 Err BleControlServer::send(const uint8_t* data, size_t len) noexcept {
+    return send_on_handle_(chr_notify_handle_, data, len);
+}
+
+Err BleControlServer::send_on_handle_(uint16_t handle, const uint8_t* data, size_t len) noexcept {
     const int conn = conn_handle_;
-    if (conn < 0 || !notify_enabled_) {
+    const bool enabled = handle == chr_data_ack_handle_ ? data_ack_enabled_ : notify_enabled_;
+    if (conn < 0 || !enabled || handle == 0) {
         dropped_tx_.fetch_add(1, std::memory_order_relaxed);
         return Err::DATA_CONNECTION_LOST;
     }
@@ -269,21 +354,43 @@ Err BleControlServer::send(const uint8_t* data, size_t len) noexcept {
     const SemaphoreHandle_t lock = static_cast<SemaphoreHandle_t>(tx_lock_);
     if (lock != nullptr) xSemaphoreTake(lock, portMAX_DELAY);
 
+    const int64_t deadline_us = esp_timer_get_time() +
+                                static_cast<int64_t>(kNotifyRetryTimeoutMs) * 1000;
     size_t sent = 0;
     while (sent < len) {
         const size_t n = (len - sent < chunk) ? (len - sent) : chunk;
-        struct os_mbuf* om = ble_hs_mbuf_from_flat(data + sent, n);
-        if (om == nullptr) {
-            dropped_tx_.fetch_add(1, std::memory_order_relaxed);
-            if (lock != nullptr) xSemaphoreGive(lock);
-            return Err::OUT_OF_MEMORY;
-        }
-        const int rc = ble_gatts_notify_custom(static_cast<uint16_t>(conn),
-                                               chr_notify_handle_, om);
-        if (rc != 0) {
-            dropped_tx_.fetch_add(1, std::memory_order_relaxed);
-            if (lock != nullptr) xSemaphoreGive(lock);
-            return Err::INTERNAL_ERROR;
+        while (true) {
+            if (conn_handle_ != conn ||
+                (handle == chr_data_ack_handle_ ? !data_ack_enabled_ : !notify_enabled_)) {
+                dropped_tx_.fetch_add(1, std::memory_order_relaxed);
+                if (lock != nullptr) xSemaphoreGive(lock);
+                return Err::DATA_CONNECTION_LOST;
+            }
+
+            struct os_mbuf* om = ble_hs_mbuf_from_flat(data + sent, n);
+            const int rc = om == nullptr
+                               ? BLE_HS_ENOMEM
+                               : ble_gatts_notify_custom(static_cast<uint16_t>(conn), handle, om);
+            if (rc == 0) {
+                break;
+            }
+
+            const bool retryable = rc == BLE_HS_ENOMEM || rc == BLE_HS_ENOMEM_EVT ||
+                                   rc == BLE_HS_EBUSY || rc == BLE_HS_EAGAIN;
+            if (!retryable || esp_timer_get_time() >= deadline_us) {
+                dropped_tx_.fetch_add(1, std::memory_order_relaxed);
+                IJPD_LOGW(kTag, "notify failed handle=%u offset=%u/%u rc=%d",
+                          static_cast<unsigned>(handle), static_cast<unsigned>(sent),
+                          static_cast<unsigned>(len), rc);
+                if (lock != nullptr) xSemaphoreGive(lock);
+                return rc == BLE_HS_ENOMEM || rc == BLE_HS_ENOMEM_EVT
+                           ? Err::OUT_OF_MEMORY
+                           : Err::INTERNAL_ERROR;
+            }
+
+            // NimBLE frees/transmits queued mbufs asynchronously. Let its host
+            // task drain the controller queue before retrying this same chunk.
+            vTaskDelay(pdMS_TO_TICKS(kNotifyRetryDelayMs));
         }
         sent += n;
     }

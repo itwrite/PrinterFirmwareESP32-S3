@@ -36,6 +36,9 @@ struct DeviceInfo {
     uint32_t psram_total_bytes;
     uint32_t psram_free_bytes;
 
+    // Logical print geometry reported by the injected profile.
+    uint32_t print_width_um = 0;
+
     // capabilities（与 CommandRouter::Capabilities 保持一致）
     bool cap_paper_feed;
     bool cap_cutter;

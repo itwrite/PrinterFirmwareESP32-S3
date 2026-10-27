@@ -86,6 +86,8 @@ struct DisplayService::Impl {
     volatile uint32_t preview_revision[kLcdH] = {};
     uint32_t preview_drawn_revision[kLcdH] = {};
     uint32_t view_w = 0, view_h = 0, view_x = 0, view_y = 0;
+    uint32_t preview_sample_x[kLcdW][2] = {};
+    uint8_t preview_sample_count[kLcdW] = {};
 };
 
 esp_err_t draw_frame_banded(esp_lcd_panel_handle_t panel, const uint16_t* fb) {
@@ -196,6 +198,7 @@ Err DisplayService::begin_job(uint32_t w_px, uint32_t h_px, uint32_t bits,
                                uint32_t dpi) noexcept {
     if (!started_ || !impl_) return Err::UNSUPPORTED;
     end_job();
+    release_job_buffers_();
     if (bits != 1 && bits != 8) bits = 1;
     if (!planes) planes = 1;
     if (h_px > kPageCapRows || planes > kPageCapPlanes || bytes_per_pixel == 0) {
@@ -258,6 +261,22 @@ Err DisplayService::begin_job(uint32_t w_px, uint32_t h_px, uint32_t bits,
     if (impl_->view_h == 0) impl_->view_h = 1;
     impl_->view_x = (kLcdW - impl_->view_w) / 2;
     impl_->view_y = (kLcdH - impl_->view_h) / 2;
+    for (uint32_t display_x = 0; display_x < impl_->view_w; ++display_x) {
+        const uint32_t x0 = uint32_t(uint64_t(display_x) * impl_->w_px /
+                                     impl_->view_w);
+        uint32_t x1 = uint32_t(uint64_t(display_x + 1) * impl_->w_px /
+                               impl_->view_w);
+        if (x1 <= x0) x1 = x0 + 1;
+        if (x1 > impl_->w_px) x1 = impl_->w_px;
+        const uint32_t source_width = x1 - x0;
+        const uint32_t samples = source_width > 1 ? 2 : 1;
+        impl_->preview_sample_count[display_x] = static_cast<uint8_t>(samples);
+        for (uint32_t sample = 0; sample < samples; ++sample) {
+            impl_->preview_sample_x[display_x][sample] = x0 +
+                static_cast<uint32_t>(uint64_t(sample * 2 + 1) * source_width /
+                                      (samples * 2));
+        }
+    }
     for (uint32_t i = 0; i < kLcdW * kLcdH; ++i) impl_->fb[i] = kWhite565;
     impl_->channel_order_count = 0;
     if (channel_order != nullptr) {
@@ -299,16 +318,18 @@ void DisplayService::feed_row(uint32_t idx, const uint8_t* data, size_t len) noe
     if (display_y >= kLcdH) return;
     const uint32_t plane_count = impl_->interleaved ? impl_->planes : 1;
     for (uint32_t plane = first_plane; plane < first_plane + plane_count &&
-                                      plane < kPreviewPlanes; ++plane) {
+                                       plane < kPreviewPlanes; ++plane) {
+        const uint32_t count_index = plane * kLcdH + display_y;
         uint16_t* sums = impl_->preview_acc +
             (size_t(plane) * kLcdH + display_y) * kLcdW;
         for (uint32_t display_x = 0; display_x < impl_->view_w; ++display_x) {
-            const uint32_t x0 = uint32_t(uint64_t(display_x) * impl_->w_px / impl_->view_w);
-            uint32_t x1 = uint32_t(uint64_t(display_x + 1) * impl_->w_px / impl_->view_w);
-            if (x1 <= x0) x1 = x0 + 1;
-            if (x1 > impl_->w_px) x1 = impl_->w_px;
+            // The LCD is only a 240px preview. Two evenly spaced samples per
+            // preview pixel preserve recognizable detail without repeatedly
+            // dividing or scanning all source pixels on the TCP RX path.
+            const uint32_t sample_count = impl_->preview_sample_count[display_x];
             uint32_t sum = 0;
-            for (uint32_t x = x0; x < x1; ++x) {
+            for (uint32_t sample = 0; sample < sample_count; ++sample) {
+                const uint32_t x = impl_->preview_sample_x[display_x][sample];
                 const uint32_t offset = impl_->interleaved
                                             ? x * impl_->bytes_per_pixel + plane
                                             : x;
@@ -320,9 +341,9 @@ void DisplayService::feed_row(uint32_t idx, const uint8_t* data, size_t len) noe
                 }
             }
             sums[impl_->view_x + display_x] = static_cast<uint16_t>(
-                sums[impl_->view_x + display_x] + sum / (x1 - x0));
+                sums[impl_->view_x + display_x] + sum / sample_count);
         }
-        impl_->preview_counts[plane * kLcdH + display_y]++;
+        impl_->preview_counts[count_index]++;
     }
     const uint32_t revision = impl_->preview_revision[display_y];
     impl_->preview_revision[display_y] = revision + 1;
@@ -349,6 +370,23 @@ void DisplayService::end_job() noexcept {
     if (!impl_) return;
     impl_->job_active = false;
     impl_->final_render_pending = impl_->preview_acc != nullptr;
+}
+
+void DisplayService::release_job_buffers_() noexcept {
+    if (!impl_) return;
+    if (impl_->page != nullptr) {
+        heap_caps_free(impl_->page);
+        impl_->page = nullptr;
+    }
+    if (impl_->preview_acc != nullptr) {
+        heap_caps_free(impl_->preview_acc);
+        impl_->preview_acc = nullptr;
+    }
+    impl_->page_cache_enabled = false;
+    impl_->cap_bpr = 0;
+    impl_->cap_rows = 0;
+    impl_->cap_planes = 0;
+    impl_->final_render_pending = false;
 }
 
 // ---- 渲染 ----
@@ -468,6 +506,7 @@ void DisplayService::render_incremental_() noexcept {
             if (impl_->preview_revision[y] != impl_->preview_drawn_revision[y]) return;
         }
         impl_->final_render_pending = false;
+        release_job_buffers_();
     }
 }
 
@@ -597,7 +636,7 @@ void DisplayService::flush_task_(void* arg) noexcept {
     auto* self = static_cast<DisplayService*>(arg);
     while (true) {
         if (self->started_ && self->impl_) {
-            if (self->impl_->page &&
+            if ((self->impl_->page || self->impl_->preview_acc) &&
                 (self->impl_->job_active || self->impl_->final_render_pending)) {
                 self->render_incremental_();
             }

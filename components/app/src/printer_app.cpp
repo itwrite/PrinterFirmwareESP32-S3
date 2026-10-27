@@ -139,7 +139,10 @@ void PrinterApp::tick_services_() noexcept {
     wifi_.stop_portal_if_connected();  // Wi-Fi 连上后关配网门户
     // mDNS 惰性启动:网络栈(netif)就绪后 mdns_init 才能成功,
     // 每 tick 重试直至成功(成功一次后不再进此分支)。
-    if (!mdns_started_ && config_.services.ijpd_tcp && wifi_.connected()) {
+    // SoftAP 热点直连(portal_active)同样要广播:ESP-IDF mDNS 默认绑定
+    // 所有 netif,AP netif 有 IP(DHCP server)即可应答 App 的查询。
+    if (!mdns_started_ && config_.services.ijpd_tcp &&
+        (wifi_.connected() || wifi_.portal_active())) {
         // device_id_ 形如 "IJPD-71D5D0":取 MAC 三字节十六进制转小写做主机名
         char lower[9] = {0};
         for (int i = 0; i < 6 && device_id_[5 + i]; ++i) {
@@ -183,12 +186,38 @@ void PrinterApp::tcp_register_sink(void* user, int ch, void* sink_user,
 
 void PrinterApp::ble_feed(void* user, const uint8_t* data, size_t len) noexcept {
     auto* self = static_cast<PrinterApp*>(user);
+    IJPD_LOGI(kTag, "ble control feed len=%u", static_cast<unsigned>(len));
     self->plane_.feed(ControlPlane::kChannelBle, data, len, task_layout::now_ms());
 }
 
 Err PrinterApp::ble_send(void* user, const uint8_t* data, size_t len) noexcept {
-    return static_cast<PrinterApp*>(user)->ble_.send(data, len);
+    auto* self = static_cast<PrinterApp*>(user);
+    const Err result = self->ble_.send(data, len);
+    static uint32_t s_fail_count = 0;
+    if (result != Err::OK) {
+        // 只在首失败与每 50 次打印：200ms 事件广播失败是常态（BLE 未连），
+        // 逐条打印会以 5 行/秒刷屏淹没关键诊断日志。
+        if ((s_fail_count++ % 50) == 0) {
+            IJPD_LOGW(kTag, "ble send dropped len=%u count=%u", static_cast<unsigned>(len),
+                      static_cast<unsigned>(s_fail_count));
+        }
+    }
+    return result;
 }
+
+Err PrinterApp::ble_data_packet(void* user, const uint8_t* data, size_t len) noexcept {
+    return PrintService::ble_data_packet(&PrintService::instance(), data, len);
+}
+
+Err PrinterApp::ble_data_hello_ack(void* user, uint32_t token,
+                                   uint16_t packet_bytes) noexcept {
+    return static_cast<PrinterApp*>(user)->ble_.sendDataHelloAck(token, packet_bytes);
+}
+
+Err PrinterApp::ble_data_packet_ack(void* user, uint16_t packet_index) noexcept {
+    return static_cast<PrinterApp*>(user)->ble_.sendDataPacketAck(packet_index);
+}
+
 
 void PrinterApp::mqtt_feed(void* user, const char* data, size_t len) noexcept {
     auto* self = static_cast<PrinterApp*>(user);
@@ -290,6 +319,7 @@ Err PrinterApp::start() noexcept {
     di_.profile = config_.profile;  // 中间件 Profile
     di_.psram_available = mem_.psram_available;
     di_.psram_sizes_valid = mem_.psram_available;
+    di_.print_width_um = config_.profile != nullptr ? config_.profile->print_width_um : 0;
     di_.cap_paper_feed = true;   // Mock 走纸（真实电机 Phase 7）
     di_.cap_cutter = (config_.profile != nullptr) && config_.profile->has_cutter;
     di_.cap_mock_print = true;
@@ -307,6 +337,7 @@ Err PrinterApp::start() noexcept {
     svc.set_profile(config_.profile);
     svc.set_hal_bundle(hal_bundle_);
     svc.set_mqtt_context(config_.mqtt_base_topic, device_id_);
+    svc.set_ble_data_callbacks(this, ble_data_hello_ack, ble_data_packet_ack);
     const Err se = svc.start(&mem_, &plane_);
     if (se != Err::OK) {
         IJPD_LOGE(kTag, "print service start failed: %s", err_name(se));
@@ -316,7 +347,8 @@ Err PrinterApp::start() noexcept {
     // 4) 路由能力（打印=PSRAM 可用；走纸=Mock；切纸=Profile）
     const bool print_ok = (se == Err::OK) && mem_.psram_available;
     const bool cutter_ok = (config_.profile != nullptr) && config_.profile->has_cutter;
-    router_.set_capabilities(Capabilities{print_ok, se == Err::OK, cutter_ok});
+    router_.set_capabilities(Capabilities{print_ok, se == Err::OK, cutter_ok,
+                                          false, config_.services.ble});
     router_.set_profile(config_.profile);
     CommandRouter::Hooks hooks;
     hooks.user = this;
@@ -383,6 +415,7 @@ Err PrinterApp::start() noexcept {
     ble_host.user = this;
     ble_host.feed = ble_feed;
     ble_host.send = ble_send;
+    ble_host.data_packet = ble_data_packet;
     if (config_.services.ble) {
         e = ble_.start(config_.ble_name, ble_host);
         if (e != Err::OK) {

@@ -102,10 +102,9 @@ selector 互操作测试；使用真实 `.../job/<id>` URI 的原始 IPP 请求�
 数据连接断开、数据连接超时、超时后恢复任务、`feed_paper` 和预期的
 `cut_paper=UNSUPPORTED`。超时事件最终返回 `JOB_TIMEOUT`。
 
-默认 App 预览已按 Ricoh Profile 的物理宽度修正：CMYK8 interleaved 输入使用
-`320 px/channel` 的逻辑宽度和 `54.1 mm` 的 head width；`1280 bytes/row` 不再被
-误当成 1280 像素，超过完整页缓存阈值时仍使用 preview-only 实时渲染。真机串口已
-捕获 `job 320x5 8b 4p layout=interleaved width_um=54100 cache=preview-only`。
+默认 App 预览已按 Ricoh A4 logical Mock 修正：CMYK8 interleaved 输入使用
+`2480×3508 px @300 DPI`、`9920 bytes/row` 和 `210 mm` A4 逻辑纸张；超过完整页缓存
+阈值时使用 preview-only 实时渲染。A4 模型不代表真实 MH5440 喷头覆盖范围。
 
 AirPrint 显示生命周期已补齐：Apple Raster 每页建立独立的显示任务，逐行预览更新与
 CMYK8 Mock HAL 的 `submitRaster` 行回调保持同一同步边界；完成、取消、HTTP 中断、HAL

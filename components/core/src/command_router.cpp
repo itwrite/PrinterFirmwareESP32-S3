@@ -3,6 +3,7 @@
 
 #include <cstring>
 
+
 #include "core/command_schema.h"
 
 namespace ijpd {
@@ -372,6 +373,11 @@ Err CommandRouter::finalize_start_print(StartPrintParams* p,
                                         const PrintProfile* profile,
                                         const char** msg) noexcept {
     *msg = "";
+    if (p->transport == StartPrintTransport::Ble &&
+        p->total_bytes_uncompressed > cfg::BLE_MAX_JOB_BYTES) {
+        *msg = "ble transport is limited to 512 KiB per job";
+        return Err::INVALID_ARGUMENT;
+    }
     const uint64_t tb = p->total_bytes_uncompressed;
     const uint64_t tp = p->total_packets;
 
@@ -557,6 +563,8 @@ Err CommandRouter::dispatch(const CommandSpec& spec, const Envelope& env,
                 p.transport = StartPrintTransport::Tcp;
             } else if (parser_.str_equals(h, "mqtt", 4)) {
                 p.transport = StartPrintTransport::Mqtt;
+            } else if (parser_.str_equals(h, "ble", 3)) {
+                p.transport = StartPrintTransport::Ble;
             } else {
                 return internal_fail(env, resp, resp_cap, resp_len);
             }
@@ -641,6 +649,11 @@ Err CommandRouter::dispatch(const CommandSpec& spec, const Envelope& env,
         }
         if (!caps_.print_supported) {
             set_msg_raw("printing is not available on this device");
+            return emit_error(resp, resp_cap, resp_len, env.msg_id, env.msg_id_len,
+                              env.cmd, env.cmd_len, Err::UNSUPPORTED, err_msg_);
+        }
+        if (p.transport == StartPrintTransport::Ble && !caps_.ble_data_supported) {
+            set_msg_raw("BLE data transport is not available on this device");
             return emit_error(resp, resp_cap, resp_len, env.msg_id, env.msg_id_len,
                               env.cmd, env.cmd_len, Err::UNSUPPORTED, err_msg_);
         }

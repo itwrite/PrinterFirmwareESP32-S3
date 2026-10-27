@@ -16,6 +16,11 @@ namespace ijpd {
 namespace airprint {
 namespace {
 constexpr const char* kTag = "airprint";
+constexpr uint32_t kMockWidthPx = 2480;
+constexpr uint32_t kMockHeightPx = 3508;
+constexpr uint32_t kMockRowBytes = kMockWidthPx * 4;
+constexpr uint32_t kMockWidthUm = 210000;
+constexpr uint32_t kMockDpi = 300;
 
 const char* abort_reason_name(HttpAbortReason reason) noexcept {
     switch (reason) {
@@ -42,7 +47,7 @@ struct AirPrintProbe::State {
     bool page_started = false;
     bool display_job_started = false;
     RasterPageDescriptor page{};
-    uint8_t cmyk_row[320 * 4] = {};
+    uint8_t cmyk_row[kMockRowBytes] = {};
     uint8_t response[kMaxIppProbeResponseBytes] = {};
     size_t response_length = 0;
 
@@ -390,9 +395,9 @@ RasterDecoderError AirPrintProbe::begin_sink_(const RasterPageDescriptor& page) 
     state_->page = page;
     state_->page_started = false;
     state_->display_job_started = DisplayService::instance().begin_job(
-        320u, page.height_px, 8u, 4u, 320u * 4u,
-        nullptr, 0u, true, 4u, 54100u, 600u) == Err::OK;
-    if (printhead_->begin(PrintheadConfig{320u * 4u, 200u, 0}) != Err::OK) {
+        kMockWidthPx, kMockHeightPx, 8u, 4u, kMockRowBytes,
+        nullptr, 0u, true, 4u, kMockWidthUm, kMockDpi) == Err::OK;
+    if (printhead_->begin(PrintheadConfig{kMockRowBytes, 200u, 0}) != Err::OK) {
         (void)printhead_->stop();
         finish_display_job_();
         return RasterDecoderError::BackendError;
@@ -408,9 +413,9 @@ RasterDecoderError AirPrintProbe::write_sink_(const uint8_t* data, size_t length
         printhead_ == nullptr) {
         return RasterDecoderError::BackendError;
     }
-    for (uint32_t pixel = 0; pixel < 320; ++pixel) {
+    for (uint32_t pixel = 0; pixel < kMockWidthPx; ++pixel) {
         const uint32_t source = static_cast<uint32_t>(
-            (static_cast<uint64_t>(pixel) * state_->page.width_px) / 320u);
+            (static_cast<uint64_t>(pixel) * state_->page.width_px) / kMockWidthPx);
         uint8_t gray = 0;
         if (state_->page.pixel_format == RasterPixelFormat::RGB888) {
             const size_t source_offset = static_cast<size_t>(source) * 3u;
@@ -445,12 +450,19 @@ RasterDecoderError AirPrintProbe::write_sink_(const uint8_t* data, size_t length
     }
     // AirPrint and IJPD now share the same visible-row boundary: the preview
     // is updated immediately before the corresponding HAL submission.
-    DisplayService::instance().feed_row(row_index, state_->cmyk_row,
-                                        sizeof(state_->cmyk_row));
-    return printhead_->submitRaster(state_->cmyk_row, sizeof(state_->cmyk_row), RasterMeta{row_index}) ==
-                   Err::OK
-               ? RasterDecoderError::Ok
-               : RasterDecoderError::BackendError;
+    const uint32_t output_begin = static_cast<uint32_t>(
+        (static_cast<uint64_t>(row_index) * kMockHeightPx) / state_->page.height_px);
+    const uint32_t output_end = static_cast<uint32_t>(
+        (static_cast<uint64_t>(row_index + 1u) * kMockHeightPx) / state_->page.height_px);
+    for (uint32_t output_row = output_begin; output_row < output_end; ++output_row) {
+        DisplayService::instance().feed_row(output_row, state_->cmyk_row,
+                                            sizeof(state_->cmyk_row));
+        if (printhead_->submitRaster(state_->cmyk_row, sizeof(state_->cmyk_row),
+                                     RasterMeta{output_row}) != Err::OK) {
+            return RasterDecoderError::BackendError;
+        }
+    }
+    return RasterDecoderError::Ok;
 }
 
 RasterDecoderError AirPrintProbe::end_sink_(RasterDecoderError status) noexcept {

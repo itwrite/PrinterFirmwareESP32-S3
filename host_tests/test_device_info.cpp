@@ -76,7 +76,7 @@ int main() {
 
     // printhead：未知 -> null + is_configured:false（禁止编造）
     CHECK_TRUE(out.find(R"("printhead":{"brand":null,"model":null,"nozzle_count":null,)"
-                        R"("dpi":null,"print_width_px":null,"pixel_format":null,)"
+                         R"("dpi":null,"print_width_px":null,"print_width_um":null,"pixel_format":null,)"
                         R"("is_configured":false)") != std::string::npos);
 
     // memory
@@ -113,6 +113,7 @@ int main() {
     CHECK_TRUE(near_after(out, "\"cmd\":\"feed_paper\"", "\"supported\":true"));
     CHECK_TRUE(near_after(out, "\"cmd\":\"start_print\"", "\"supported\":true"));
     CHECK_TRUE(near_after(out, "\"cmd\":\"get_device_info\"", "\"supported\":true"));
+    CHECK_TRUE(out.find("\"ble_data_transport\":false") != std::string::npos);
     // start_print 首参数（schema 顺序）
     CHECK_TRUE(out.find(R"("key":"job_id","label":"任务 ID","type":"string","required":true)") !=
                std::string::npos);

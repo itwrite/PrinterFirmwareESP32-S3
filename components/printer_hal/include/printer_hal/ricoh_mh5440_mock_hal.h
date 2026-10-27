@@ -14,9 +14,9 @@
 namespace ijpd {
 
 struct RicohMh5440MockConfig {
-    uint32_t virtual_nozzles_per_channel = 320;
+    uint32_t virtual_nozzles_per_channel = 2480;
     uint8_t channel_count = 4;
-    uint32_t logical_width_px = 320;
+    uint32_t logical_width_px = 2480;
     uint32_t row_bytes = 0;  // 0 = logical_width_px * channel_count
 
     bool strict_head_geometry = true;
@@ -32,7 +32,6 @@ struct RicohMh5440MockConfig {
     uint32_t backpressure_after_rows = 0;
     uint32_t missing_nozzle_ppm = 0;
     uint32_t random_seed = 0x54484D34u;
-
     bool inject_paper_jam = false;
     bool inject_thermal_fault = false;
 };
@@ -91,6 +90,7 @@ private:
     uint32_t random_state_ = 0;
     uint32_t row_bytes_ = 0;
     uint32_t next_row_index_ = 0;
+    uint32_t effective_row_period_us_ = 5000;  // begin() 时由 rows_per_second 或 config 推导
     bool configured_ = false;
     bool stopped_ = false;
     bool hardware_fault_ = false;

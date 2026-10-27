@@ -119,8 +119,9 @@ JSON UTF-8 body + ASCII '#'
     "hal_mode": "mock"
   },
   "printhead": {
-     "dpi": 600,
-     "print_width_px": 320,
+     "dpi": 300,
+     "print_width_px": 2480,
+     "print_width_um": 210000,
      "pixel_format": "cmyk8",
     "is_configured": false
   },
@@ -218,8 +219,9 @@ gray, lightGray, red, green, orange, violet, white, clear, custom
 
 名称区分大小写。未提供时使用设备默认的平面顺序。
 
-当前默认固件使用 RICOH MH5440 logical CMYK8 Mock，第三方应优先使用
-`mode:"raster"`、`bytes_per_row:1280` 和 `image_planes:4`。虽然 schema 保留
+当前默认固件使用 RICOH MH5440 logical A4 CMYK8 Mock，第三方应优先使用
+`mode:"raster"`、`bytes_per_row:9920`、`total_rows:3508` 和 `image_planes:4`。
+虽然 schema 保留
 `mode:"escpos"`，当前默认镜像没有可用的 IJPD ESC/POS 数据流水线；
 原始 ESC/POS 应使用独立的 [RAW TCP 协议](escpos-raw-tcp.md)，并且该服务需要
 显式启用。

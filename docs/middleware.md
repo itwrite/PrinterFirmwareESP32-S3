@@ -114,7 +114,7 @@ Err stop();
 
 RICOH MH5440 没有真实硬件时的逻辑 Mock 方案见
 [`RICOH_MH5440_Mock_HAL.md`](../RICOH_MH5440_Mock_HAL.md)。该方案明确区分公开
-喷头规格、整机纸路仿真和未来控制器电气层，不把 A4 或仿真 600 dpi 误报为单个
+喷头规格、整机纸路仿真和未来控制器电气层，不把 A4 logical Mock 或仿真 DPI 误报为单个
 MH5440 的物理覆盖能力。
 
 ### Stepper / Cutter / Sensor

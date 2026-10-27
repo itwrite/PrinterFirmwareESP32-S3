@@ -33,7 +33,7 @@
 |---|---|---|
 | 类型 | 压电式、金属隔膜 piston pusher | 仅用于 profile 说明 |
 | 喷嘴 | `1,280`，`4 x 320`，交错排列 | 用于逻辑几何模型，不等同于输入行格式 |
-| 喷头宽度 | `54.1 mm` | 作为单个 head 的物理宽度上限说明 |
+| 喷头宽度 | `54.1 mm` | 真实单 head 事实；当前 A4 Mock 不将其作为整页输入限制 |
 | 四色喷嘴间距 | `1/150 inch`，约 `0.1693 mm` | 作为 channel pitch 说明 |
 | 行间距 | `0.55 mm` | 只作为未来物理调度参数，当前不驱动 |
 | 原生分辨率 | 官方页面描述为 `600 dpi` | 不直接推导 `bytes_per_row` |
@@ -141,36 +141,39 @@ row_index: 从 0 开始递增
 
 这里的 `CMYK8` 是项目层输入格式，不是对 Ricoh 内部电气数据格式的声明。
 
-### 5.2 MH5440 逻辑几何
+### 5.2 MH5440 A4 logical Mock 几何
 
 Mock 默认记录以下几何：
 
 ```text
 channels                 = 4
-virtual_nozzles_per_ch   = 320
-virtual_total_nozzles    = 1280
-channel_pitch_dpi        = 150
-head_native_reference_dpi = 600
+logical_page             = A4
+logical_width_px         = 2480
+logical_height_px        = 3508
+logical_dpi              = 300
+row_bytes                = 9920 (2480 × 4 CMYK8)
+virtual_nozzles_per_ch   = 2480 (software pressure model)
+virtual_total_nozzles    = 9920 (software pressure model)
 ```
 
-`virtual_nozzles_per_ch=320` 不意味着输入一定必须是 320 像素宽。建议提供两种模式：
+当前 A4 logical Mock 的输入固定为整页 CMYK8 interleaved 行。它不代表真实喷头
+拥有 2480 个物理喷嘴，也不代表真实 MH5440 覆盖 A4。
+
+建议提供两种模式：
 
 | 模式 | 行宽行为 | 用途 |
 |---|---|---|
-| `strict_head_geometry` | `row_bytes == 320 * 4` | 验证单个四色 head 的逻辑映射 |
+| `strict_head_geometry` | `row_bytes == 2480 * 4` | 验证 A4 logical Mock 输入 |
 | `logical_raster` | 使用 Job/Profile 的 `row_bytes`，只做 CMYK 统计 | 验证大图、协议和吞吐，不伪造物理映射 |
 
 不要把 `total_nozzles=1280` 直接写成 `print_width_px=1280`。在当前 `CMYK8`
 语义下，这会被解释为每个通道都有 1280 个逻辑像素，容易造成错误的行宽和能力上报。
 
-### 5.3 A4 仅是整机纸路模型
+### 5.3 A4 logical Mock 模型
 
-单个 MH5440 的公开打印宽度是 `54.1 mm`，不是 A4 的 `210 mm`。因此：
-
-- `A4` 可以作为 Mock 纸张和坐标系。
-- 不能声称单个 MH5440 覆盖整张 A4。
-- 如果以后要模拟 A4，需要明确选择 head array、横向扫描、拼接多 head 或缩放模型。
-- 这些整机选择应放在 `MockPaperPath`/`MockPrinterModel`，不能隐藏在 `IPrintheadHal` 中。
+当前软件 Mock 明确选择 A4@300 DPI 的整页逻辑输入：`2480×3508 px`、CMYK8
+interleaved、`9920 bytes/row`。这只是协议、流水线和显示的压力模型，不代表单个
+真实 MH5440 喷头可以覆盖整张 A4，也不代表真实 carriage/head array 结构。
 
 ## 6. Mock 行处理模型
 
@@ -353,10 +356,10 @@ MockCutterHal       -> BoardCutterHal（如存在）
 
 `PrintPipeline`、控制协议、事件序列和上层 Job 代码不改。
 
-默认 App 的屏幕预览也使用该 Profile 的几何：CMYK8 interleaved 行按 `320` 个逻辑
-像素、4 通道解析，页面宽度按 `print_width_um=54100`（54.1 mm）计算。由于
-`1280 bytes/row` 超过完整页缓存的预览阈值，设备采用 preview-only 模式实时渲染，
-不会把 1280 个字节误当成 1280 个像素，也不会退化为错误的 A4 全宽预览。
+默认 App 的屏幕预览也使用该 Profile 的 A4 logical 几何：CMYK8 interleaved 行按
+`2480` 个逻辑像素、4 通道解析，页面宽度按 `print_width_um=210000`（210 mm）计算。
+`9920 bytes/row` 超过完整页缓存的预览阈值，设备采用 preview-only 模式实时渲染。
+该 A4 是软件压力模型，不代表真实 MH5440 喷头覆盖整张 A4。
 
 ### 第三步：再增加真实控制器层
 

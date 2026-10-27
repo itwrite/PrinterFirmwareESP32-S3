@@ -70,6 +70,10 @@ private:
     // BleControlServer Host 适配
     static void ble_feed(void* user, const uint8_t* data, size_t len) noexcept;
     static Err ble_send(void* user, const uint8_t* data, size_t len) noexcept;
+    static Err ble_data_packet(void* user, const uint8_t* data, size_t len) noexcept;
+    static Err ble_data_hello_ack(void* user, uint32_t token,
+                                  uint16_t packet_bytes) noexcept;
+    static Err ble_data_packet_ack(void* user, uint16_t packet_index) noexcept;
     static void mqtt_feed(void* user, const char* data, size_t len) noexcept;
     static Err mqtt_send(void* user, const uint8_t* data, size_t len) noexcept;
 

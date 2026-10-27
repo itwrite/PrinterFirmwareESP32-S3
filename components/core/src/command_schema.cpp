@@ -67,7 +67,7 @@ constexpr const char* const kIntegrityOpts[] = {"none", "crc32"};
 
 // ---- 参数表 ----
 constexpr const char* const kModeOpts[] = {"raster", "escpos"};
-constexpr const char* const kTransportOpts[] = {"tcp", "mqtt"};
+constexpr const char* const kTransportOpts[] = {"tcp", "mqtt", "ble"};
 
 constexpr ParamSpec kStartPrintParams[] = {
     p_str("job_id", "任务 ID", "本次打印任务的标识，仅允许 [A-Za-z0-9_-]",
@@ -82,8 +82,8 @@ constexpr ParamSpec kStartPrintParams[] = {
            false, kIntegrityOpts, 2, "none"),
     p_enum("mode", "数据模式", "raster=结构化栅格行；escpos=ESC/POS 原始流透传",
            false, kModeOpts, 2, "raster"),
-    p_enum("transport", "传输方式", "tcp=IJPD 数据连接；mqtt=MQTT 分片承载 IJPD 数据流",
-           false, kTransportOpts, 2, "tcp"),
+    p_enum("transport", "传输方式", "tcp=IJPD 数据连接；mqtt=MQTT 分片；ble=BLE 数据特征",
+            false, kTransportOpts, 3, "tcp"),
     // bytes_per_row / total_rows 仅 mode=raster 必填（schema 层可选，语义层按 mode 校验）
     p_int("bytes_per_row", "每行字节数", "一行像素数据的字节数（mode=raster 时必填）",
           false, 1, 65535, "bytes"),

@@ -22,7 +22,7 @@ namespace {
 
 constexpr const char* kTag = "portal";
 constexpr uint16_t kPortalPort = 80;
-constexpr int kMaxStations = 1;
+constexpr int kMaxStations = 2;
 
 // ---- 配网页面 HTML（单文件，内嵌 CSS/JS，手机友好） ----
 constexpr const char kPortalHtml[] = R"html(<!DOCTYPE html>

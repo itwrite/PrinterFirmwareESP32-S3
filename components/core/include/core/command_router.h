@@ -39,7 +39,7 @@ namespace ijpd {
 enum class StartPrintMode : uint8_t { Raster = 0, EscPos = 1 };
 const char* start_print_mode_name(StartPrintMode m) noexcept;
 
-enum class StartPrintTransport : uint8_t { Tcp = 0, Mqtt = 1 };
+enum class StartPrintTransport : uint8_t { Tcp = 0, Mqtt = 1, Ble = 2 };
 
 // start_print 已验证参数（schema + 语义校验后；含派生量）
 struct StartPrintParams {
@@ -77,12 +77,13 @@ struct FeedPaperParams {
 };
 
 // 运行时能力（平台注入；门控 UNSUPPORTED 与 device_info 的 supported 同源）
-struct Capabilities {
-    bool print_supported;  // PSRAM 可用等
-    bool feed_supported;
-    bool cutter_supported;
-    bool mqtt_supported = false;
-};
+    struct Capabilities {
+        bool print_supported;  // PSRAM 可用等
+        bool feed_supported;
+        bool cutter_supported;
+        bool mqtt_supported = false;
+        bool ble_data_supported = false;
+    };
 
 class CommandRouter {
 public:

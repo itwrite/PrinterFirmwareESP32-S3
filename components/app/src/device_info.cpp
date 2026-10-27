@@ -44,6 +44,7 @@ bool write_printhead_section(JsonWriter& w, const PrintProfile* pf) noexcept {
         if (!w.kv_null("nozzle_count")) return false;
         if (!w.kv_i64("dpi", pf->dpi)) return false;
         if (!w.kv_i64("print_width_px", pf->print_width_px)) return false;
+        if (!w.kv_i64("print_width_um", pf->print_width_um)) return false;
         if (!w.kv_cstr("pixel_format", pf->pixel_format_name)) return false;
         if (!w.kv_bool("is_configured", false)) return false;  // Mock 阶段
     } else {
@@ -51,7 +52,8 @@ bool write_printhead_section(JsonWriter& w, const PrintProfile* pf) noexcept {
         // 字段名与文档 §4.1 / 有 Profile 分支保持一致(print_width_px / pixel_format),
         // 此前误用 print_width_mm/interface,App 按文档解析会缺字段。
         if (!w.kv_null("brand") || !w.kv_null("model") || !w.kv_null("nozzle_count") ||
-            !w.kv_null("dpi") || !w.kv_null("print_width_px") ||
+             !w.kv_null("dpi") || !w.kv_null("print_width_px") ||
+             !w.kv_null("print_width_um") ||
             !w.kv_null("pixel_format")) {
             return false;
         }
@@ -99,6 +101,7 @@ bool write_capabilities_section(JsonWriter& w, const DeviceInfo& di) noexcept {
     if (!w.kv_bool("cutter", di.cap_cutter)) return false;
     if (!w.kv_bool("mock_print", di.cap_mock_print)) return false;
     if (!w.kv_bool("crc32", true)) return false;
+    if (!w.kv_bool("ble_data_transport", di.services.ble)) return false;
     if (!w.key("services") || !w.begin_object()) return false;
     if (!w.kv_bool("wifi", di.services.wifi) ||
         !w.kv_bool("ble", di.services.ble) ||

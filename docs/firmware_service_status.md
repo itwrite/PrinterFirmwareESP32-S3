@@ -9,7 +9,8 @@
 | 默认固件 | `tools/idf.sh -B build build` | IJPD TCP、BLE 和常规 Wi-Fi 固件 |
 | AirPrint probe | `tools/idf.sh -B build-airprint-probe build -DAIRPRINT_ENABLE=ON` | AirPrint/iOS 联调，支持按需 SoftAP 配网 |
 
-两个变体当前都使用 `RICOH-MH5440-MOCK` / `MockRicohMh5440Hal`，不代表真实喷头和真实纸张输出。
+两个变体当前都使用 `RICOH-MH5440-MOCK` / `MockRicohMh5440Hal` 的 A4 logical 模型，
+不代表真实喷头和真实纸张输出。
 
 ## 服务状态
 
@@ -20,6 +21,7 @@
 | IJPD 数据 TCP | 按任务启用 | 按任务启用 | TCP `9101` | raster 数据传输；由 `start_print` 返回端口 |
 | IJPD mDNS/DNS-SD | STA 获得 IP 后启用 | STA 获得 IP 后启用 | `_ijpd._tcp.local` | 发现 IJPD 控制服务，指向 TCP `9100` |
 | BLE GATT 控制 | 已启用 | 已启用 | BLE `IJPD-Printer` | IJPD 控制协议；不承载 raster 数据 |
+| BLE IJPD 数据 | Phase 1 备用 | Phase 1 备用 | Data Write/Data ACK characteristics | 小任务 raster 传输，512 KiB 上限 |
 | SoftAP 配网 Wi-Fi | 按需启用 | 按需启用 | SSID `IJPD-Setup-XXXX` | 首次或失败后的 Wi-Fi 配网 |
 | SoftAP 配网 HTTP | 按需启用 | 按需启用 | `192.168.4.1:80` | 配网页面、扫描和提交 Wi-Fi 凭据 |
 | 主动切换配网 | `start_provisioning` | `start_provisioning` | IJPD 控制 TCP/BLE/MQTT | 已保存 Wi-Fi 时主动切换到 SoftAP；活动传输中拒绝 |

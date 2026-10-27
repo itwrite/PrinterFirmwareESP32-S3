@@ -61,6 +61,14 @@ Err MockRicohMh5440Hal::begin(const PrintheadConfig& cfg) {
 
     begin_config_ = cfg;
     row_bytes_ = cfg.row_bytes == 0 ? derived_row_bytes : cfg.row_bytes;
+    // 行周期优先级：宿主注入的 rows_per_second > 静态配置 row_period_us。
+    // 服务层以 2000 rows/s 请求，忽略它会让消费速度(200 行/s)远低于
+    // 网络吞吐，槽池频繁背压、整页打印时间被拉长到 17s+。
+    if (cfg.rows_per_second > 1) {
+        effective_row_period_us_ = ceil_div_u32(1000000u, cfg.rows_per_second);
+    } else {
+        effective_row_period_us_ = config_.row_period_us;
+    }
     reset_stats_();
     random_state_ = config_.random_seed == 0 ? 1u : config_.random_seed;
     next_row_index_ = 0;
@@ -147,7 +155,7 @@ Err MockRicohMh5440Hal::submitRaster(const uint8_t* data, size_t len,
     stats_.last_row_index = meta.row_index;
     next_row_index_ = meta.row_index + 1;
 
-    const uint32_t row_period_ms = ceil_div_u32(config_.row_period_us, 1000u);
+    const uint32_t row_period_ms = ceil_div_u32(effective_row_period_us_, 1000u);
     delay_ms_(row_period_ms);
 
     if ((config_.fault_after_rows != 0 &&

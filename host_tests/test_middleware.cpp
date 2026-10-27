@@ -78,14 +78,14 @@ int main() {
                        &p, &profiles::kInkjet6in, &msg) == Err::OK);
 
         StartPrintParams ricoh = p;
-        ricoh.bytes_per_row = 1280;
+        ricoh.bytes_per_row = 9920;
         ricoh.total_rows = 2;
-        ricoh.total_bytes_uncompressed = 2560;
+        ricoh.total_bytes_uncompressed = 19840;
         CHECK_TRUE(profiles::kRicohMh5440Mock.validate() == Err::OK);
         CHECK_TRUE(CommandRouter::finalize_start_print(
                        &ricoh, &profiles::kRicohMh5440Mock, &msg) == Err::OK);
-        CHECK_EQ(profiles::kRicohMh5440Mock.print_width_px, 320u);
-        CHECK_EQ(profiles::kRicohMh5440Mock.effective_bpr_max(4), 1280u);
+        CHECK_EQ(profiles::kRicohMh5440Mock.print_width_px, 2480u);
+        CHECK_EQ(profiles::kRicohMh5440Mock.effective_bpr_max(4), 9920u);
 
         // escpos 模式：热敏支持，喷墨拒绝
         p.mode = StartPrintMode::EscPos;

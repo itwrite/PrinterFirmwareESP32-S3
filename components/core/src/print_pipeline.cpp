@@ -99,6 +99,7 @@ Err PrintPipeline::start(const Config& cfg, const Os& os) noexcept {
 
 void PrintPipeline::on_hello_ok_() noexcept {
     (void)sm_.fire(JobEvent::HandshakeOk);  // WAITING_DATA_CONN -> RECEIVING
+    if (os_.on_hello != nullptr) os_.on_hello(os_.user);
 }
 
 void PrintPipeline::on_frame_(const BinFrameParser::Frame& f) noexcept {
@@ -263,6 +264,8 @@ PrintPipeline::Pump PrintPipeline::decode_pump() noexcept {
         return Pump::Failed;
     }
     bufs_[bi].st.store(static_cast<uint8_t>(BufSt::Empty), std::memory_order_release);
+
+    if (os_.on_packet != nullptr) os_.on_packet(os_.user, b.seq);
 
     const uint32_t n = decoded_packets_.fetch_add(1, std::memory_order_relaxed) + 1;
     stats_.on_packet_decoded(ulen);
