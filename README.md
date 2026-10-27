@@ -63,6 +63,11 @@
 query/Print-Job service 仅在 `AIRPRINT_ENABLE=ON` 的显式构建中包含，默认镜像不
 监听 TCP 631 或发布 IPP mDNS。
 
+首次进入或通过 `start_provisioning` 再次进入配网时，固件会在 SoftAP 启动前临时
+切到 STA 模式扫描附近 Wi-Fi 并缓存结果，然后恢复纯 SoftAP。App 访问 `/scan` 时
+只读取缓存，不会在手机连接热点期间启动扫描；扫描未找到网络时仍可手动输入 SSID。
+详细时序见 [SoftAP HTTP 配网协议](docs/protocols/provisioning-http.md)。
+
 当前默认 IJPD Profile 是 **逻辑 CMYK1 四遍 Mock**：2480 × 3508 像素、300 DPI，
 C/M/Y/K 四个 1-bit 平面依次传输和模拟打印，每个平面 310 bytes/row。iPhone 与
 ESP32-S3 真机联调中，约 4.1 MB 任务打印完成耗时约 17 秒。该数据用于记录当前 Mock

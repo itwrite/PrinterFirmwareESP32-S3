@@ -22,9 +22,9 @@
 | IJPD mDNS/DNS-SD | STA 获得 IP 后启用 | STA 获得 IP 后启用 | `_ijpd._tcp.local` | 发现 IJPD 控制服务，指向 TCP `9100` |
 | BLE GATT 控制 | 已启用 | 已启用 | BLE `IJPD-Printer` | IJPD 控制协议；不承载 raster 数据 |
 | BLE IJPD 数据 | Phase 1 备用 | Phase 1 备用 | Data Write/Data ACK characteristics | 小任务 raster 传输，512 KiB 上限 |
-| SoftAP 配网 Wi-Fi | 按需启用 | 按需启用 | SSID `IJPD-Setup-XXXX` | 首次或失败后的 Wi-Fi 配网 |
-| SoftAP 配网 HTTP | 按需启用 | 按需启用 | `192.168.4.1:80` | 配网页面、扫描和提交 Wi-Fi 凭据 |
-| 主动切换配网 | `start_provisioning` | `start_provisioning` | IJPD 控制 TCP/BLE/MQTT | 已保存 Wi-Fi 时主动切换到 SoftAP；活动传输中拒绝 |
+| SoftAP 配网 Wi-Fi | 按需启用 | 按需启用 | SSID `IJPD-Setup-XXXX` | 首次、连接失败后或主动重新配网 |
+| SoftAP 配网 HTTP | 按需启用 | 按需启用 | `192.168.4.1:80` | 配网页面、读取启动热点前缓存的扫描结果、提交 Wi-Fi 凭据 |
+| 主动切换配网 | `start_provisioning` | `start_provisioning` | IJPD 控制 TCP/BLE/MQTT | 已保存 Wi-Fi 时重新扫描后切换到 SoftAP；活动传输中拒绝 |
 | ESC/POS RAW TCP | 关闭 | 关闭 | 默认 TCP `9102` | 原始 ESC/POS 字节流；仅固件变体可选启用 |
 | MQTT 控制/任务分片 | 关闭 | 关闭 | 配置的 MQTT Broker | 云端控制和任务数据承载 |
 | IPP/AirPrint | 关闭 | 已启用 | TCP `631`，`/ipp/print` | AirPrint 查询、Print-Job 和 Job 查询 |

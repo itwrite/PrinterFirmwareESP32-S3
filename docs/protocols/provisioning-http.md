@@ -5,6 +5,8 @@
 Wi-Fi 服务启用且设备没有可用的已保存 STA 凭据，或已保存凭据连接失败时，
 设备进入 SoftAP 配网模式。设备也支持通过 IJPD 控制命令
 `start_provisioning` 主动切换到 SoftAP，因此更换路由器时不需要先清除旧凭据。
+每次进入门户（包括已有凭据时主动重新配网）都会在 SoftAP 启动前临时以 STA
+模式扫描附近网络、缓存结果，再切回纯 SoftAP。设备完成扫描后才广播配网热点。
 
 ## 2. SoftAP 参数
 
@@ -44,11 +46,15 @@ DNS；第三方 App 应直接访问固定地址。
 - `rssi`：信号强度，单位 dBm。
 - `auth`：`1` 表示非开放网络，`0` 表示开放网络。
 
-最多返回 `30` 个 AP。扫描在 AP 模式下可能不可用，此时服务返回一个提示
-对象而不是 HTTP 错误，例如：
+最多缓存并返回 `25` 个 AP。射频扫描仅在 SoftAP 启动前执行；热点运行期间此端点
+只返回缓存，不会调用 Wi-Fi 扫描 API，因此不会在手机连接热点时中断 beacon 或
+配网 HTTP 连接。再次配网时会重新扫描，不沿用上一次缓存。
+
+扫描失败或附近没有可见网络时，返回空数组 `[]`；用户可通过客户端的手动输入
+字段提交 SSID。若门户仍在准备扫描，服务返回提示对象而不是 HTTP 错误，例如：
 
 ```json
-[{"ssid":"(Scan unavailable, please enter manually)","rssi":-100,"auth":0}]
+[{"ssid":"(Wi-Fi scan is preparing; retry shortly)","rssi":-100,"auth":0}]
 ```
 
 ### `POST /connect`
