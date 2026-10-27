@@ -12,7 +12,7 @@
 
 ## 功能状态（三级标注）
 
-### ✅ 已完成（主机侧全量验证，待设备联调确认）
+### ✅ 已完成（主机验证与 ESP32-S3 真机联调）
 
 | 功能 | 验证方式 |
 |---|---|
@@ -21,6 +21,9 @@
 | JSON 流式写出（`#`→`\u0023` 强制转义/溢出不截断） | 单测 ~226 断言 |
 | 六命令路由 + 参数校验 + 语义交叉 + 元数据同源 | 单测 ~192 断言 |
 | 设备信息上报（PSRAM 余量/能力/限制/命令元数据） | 回环断言 ~31 |
+| 通用打印头档案驱动 | Profile 声明布局、通道顺序/位深、宽高限制和逐通道打印属性；IJPD 能力读取、任务校验、光栅转换与 HAL 分发均按档案运行 |
+| IJPD CMYK1 四平面打印路径 | ESP32-S3 + iPhone 真机验证；4.1 MB 光栅传输并完成打印约 17 秒 |
+| 打印进度与速率修复 | 修复 Mock 每行毫秒取整限速、1-bit 通道逐像素处理开销，以及传输完成事件导致的打印进度回退 |
 | CRC-32/ISO-HDLC | 标准向量 + 协议示例 |
 | 二进制帧状态机（Hello/顺序/长度/CRC/NeedBuffer） | 单测 ~230 + fuzz 10 万 |
 | LZ4 Block 解压（安全边界/重叠拷贝/恶意输入） | 手工向量 + 回环 + fuzz 20 万 |
@@ -37,7 +40,7 @@
 
 | 功能 | Mock 行为 | 真实实现 |
 |---|---|---|
-| 喷头（`MockPrintheadHal`） | 每行延时 5ms + 故障注入 | Phase 7：需厂商时序/电压/波形 |
+| 喷头（Mock HAL） | 默认 IJPD Profile 为四个 1-bit 平面，依 C/M/Y/K 顺序模拟逐通道输出；支持逻辑统计、CRC 和故障注入 | Phase 7：需厂商时序/电压/波形 |
 | 走纸（`MockStepperHal`） | 按距离/速度模拟延时 | Phase 7：GPTimer 脉冲+梯形加减速 |
 | 切纸（`MockCutterHal`） | 恒返回 `UNSUPPORTED` | Phase 7：确认机构后启用 |
 
@@ -47,8 +50,8 @@
 |---|---|---|
 | 真实喷墨打印 | 喷头型号/时序/波形未知（`docs/hardware_questions.md` B 组） | 用户提供官方资料 |
 | 真实走纸/切纸 | 电机/传感器型号未知（C/D 组） | 同上 |
-| Wi-Fi / BLE / TCP 设备行为 | 默认 Mock 镜像已在 ESP32-S3 启动；完整打印链路仍待联调 | 真实喷头/机械硬件 |
-| 吞吐量与水位实测 | 数量级预算已完成，设备数据待补录 | `tools/send_job.py` 联调后更新 `memory_budget.md` |
+| Wi-Fi / BLE / TCP 设备行为 | IJPD TCP 控制/数据通道及 iPhone 到 ESP32-S3 的完整逻辑 Mock 打印链路已验证 | 真实喷头/机械硬件 |
+| 物理打印头与纸路 | 当前打印由 Mock HAL 模拟；真机链路测试不代表纸张输出或真实喷头驱动 | 取得喷头、电机和传感器资料并完成真实 HAL |
 | 任务栈高水位 | 使用初值 | `uxTaskGetStackHighWaterMark` 实测后固定 |
 | Wi-Fi 配网方式 | 当前为 SoftAP HTTP 门户 | 如需替换再改平台层 |
 
@@ -59,6 +62,12 @@
 控制和 TCP 数据通道；ESC/POS RAW TCP、MQTT 为可选服务。AirPrint Core 和
 query/Print-Job service 仅在 `AIRPRINT_ENABLE=ON` 的显式构建中包含，默认镜像不
 监听 TCP 631 或发布 IPP mDNS。
+
+当前默认 IJPD Profile 是 **逻辑 CMYK1 四遍 Mock**：2480 × 3508 像素、300 DPI，
+C/M/Y/K 四个 1-bit 平面依次传输和模拟打印，每个平面 310 bytes/row。iPhone 与
+ESP32-S3 真机联调中，约 4.1 MB 任务打印完成耗时约 17 秒。该数据用于记录当前 Mock
+数据路径性能，不代表真实喷头速度；设备能力与打印数据格式由通用 `PrintProfile`
+声明，App 不按具体喷头型号硬编码转换规则。
 
 ---
 
@@ -78,7 +87,7 @@ query/Print-Job service 仅在 `AIRPRINT_ENABLE=ON` 的显式构建中包含，�
 │   ├── app/                  # control_plane / device_info / print_service / printer_app
 │   ├── airprint_core/        # opt-in 平台无关 IPP/HTTP/Job Core 和样本契约
 │   └── airprint_esp/         # opt-in ESP-IDF HTTP/mDNS/query/Print-Job transport
-├── host_tests/               # 40 项测试（自写断言 + ASan/UBSan/TSan + fuzz 固定种子）
+├── host_tests/               # 主机测试（自写断言 + ASan/UBSan/TSan + fuzz 固定种子）
 ├── tools/                    # make_packets.py / send_job.py（仅 Python 标准库）
 └── docs/                     # 协议 / 内存预算 / 决策 / 硬件问题 / 测试报告 / 依赖审计
 ```
@@ -90,7 +99,7 @@ query/Print-Job service 仅在 `AIRPRINT_ENABLE=ON` 的显式构建中包含，�
 ```bash
 cmake -S host_tests -B host_tests/build
 cmake --build host_tests/build
-ctest --test-dir host_tests/build --output-on-failure   # 40 项 / ~57 万断言
+ctest --test-dir host_tests/build --output-on-failure
 ```
 
 TSan（并发模块改动后建议运行）：
@@ -163,8 +172,8 @@ BLE：搜索设备名 `IJPD-Printer`，UUID 和分片规则见
 | [docs/protocols/mqtt.md](docs/protocols/mqtt.md) | 可选 MQTT 控制、事件和 IJCH 任务分片 |
 
 以上文档以当前源码为准。默认固件不提供 IPP/AirPrint；显式 AirPrint variant
-可把验证过的 `image/urf` 送入 RICOH logical CMYK8 Mock，但尚未形成真实喷头
-打印链路。
+可把验证过的 `image/urf` 送入独立的逻辑 CMYK8 Mock 路径。默认 IJPD Profile 使用
+CMYK1 四平面 Mock。两者都尚未接入真实喷头电气驱动。
 
 ### 工程设计和测试
 
