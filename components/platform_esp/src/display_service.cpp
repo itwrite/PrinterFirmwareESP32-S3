@@ -38,6 +38,7 @@ constexpr uint32_t kPreviewPlanes = 4;
 constexpr uint32_t kPageCapBpr = 384;
 constexpr uint32_t kPageCapRows = 4000;
 constexpr uint32_t kPageCapPlanes = 4;
+constexpr uint32_t kPreviewRowsPerFlush = 24;
 
 // RasterImage/BitPacker 语义:0=纸面,1=着墨。
 constexpr int kInkBitLevel = 1;
@@ -88,8 +89,8 @@ struct DisplayService::Impl {
     volatile uint32_t preview_revision[kLcdH] = {};
     uint32_t preview_drawn_revision[kLcdH] = {};
     uint32_t view_w = 0, view_h = 0, view_x = 0, view_y = 0;
-    uint32_t preview_sample_x[kLcdW][2] = {};
-    uint8_t preview_sample_count[kLcdW] = {};
+    uint32_t preview_sample_x0[kLcdW] = {};
+    uint32_t preview_sample_x1[kLcdW] = {};
 };
 
 esp_err_t draw_frame_banded(esp_lcd_panel_handle_t panel, const uint16_t* fb) {
@@ -183,7 +184,7 @@ Err DisplayService::start() noexcept {
     }
     IJPD_LOGI(kTag, "first draw done");
 
-    if (task_layout::spawn("disp", flush_task_, this, 1, task_layout::kPrioReport, kFlushStack) != Err::OK)
+    if (task_layout::spawn("disp", flush_task_, this, 1, task_layout::kPrioDisplay, kFlushStack) != Err::OK)
         return Err::OUT_OF_MEMORY;
     started_ = true;
     IJPD_LOGI(kTag, "display ready %dx%d", kLcdW, kLcdH);
@@ -235,6 +236,10 @@ Err DisplayService::begin_job(uint32_t w_px, uint32_t h_px, uint32_t bits,
     impl_->interleaved = interleaved;
     impl_->bytes_per_pixel = bytes_per_pixel;
     impl_->packed_pixel_bits = packed_pixel_bits;
+    // The logical preview combines every channel at the same image row, even
+    // when the printhead consumes the page as separate sequential passes.
+    // The page cache remains row-major by plane; render_frame_ maps from the
+    // current pass to its matching preview plane.
     impl_->sequential_channels = false;
     impl_->physical_width_um = physical_width_um;
     impl_->dpi = dpi;
@@ -274,14 +279,8 @@ Err DisplayService::begin_job(uint32_t w_px, uint32_t h_px, uint32_t bits,
                                impl_->view_w);
         if (x1 <= x0) x1 = x0 + 1;
         if (x1 > impl_->w_px) x1 = impl_->w_px;
-        const uint32_t source_width = x1 - x0;
-        const uint32_t samples = source_width > 1 ? 2 : 1;
-        impl_->preview_sample_count[display_x] = static_cast<uint8_t>(samples);
-        for (uint32_t sample = 0; sample < samples; ++sample) {
-            impl_->preview_sample_x[display_x][sample] = x0 +
-                static_cast<uint32_t>(uint64_t(sample * 2 + 1) * source_width /
-                                      (samples * 2));
-        }
+        impl_->preview_sample_x0[display_x] = x0;
+        impl_->preview_sample_x1[display_x] = x1;
     }
     for (uint32_t i = 0; i < kLcdW * kLcdH; ++i) impl_->fb[i] = kWhite565;
     impl_->channel_order_count = 0;
@@ -324,18 +323,20 @@ void DisplayService::feed_row(uint32_t idx, const uint8_t* data, size_t len) noe
         const uint32_t pixels_per_plane = per_row_bits == 0 ? 0
             : static_cast<uint32_t>((uint64_t(len) * 8) / per_row_bits);
         if (pixels_per_plane == 0) return;
+        // Each interleaved row contains all channels, so accumulate each
+        // logical plane independently for the shared preview line.
         for (uint32_t plane = 0; plane < impl_->planes && plane < kPreviewPlanes; ++plane) {
             uint16_t* sums = impl_->preview_acc + size_t(plane) * kLcdH * kLcdW;
             for (uint32_t display_x = 0; display_x < impl_->view_w; ++display_x) {
-                const uint32_t sample_count = impl_->preview_sample_count[display_x];
+                const uint32_t x0 = impl_->preview_sample_x0[display_x];
+                const uint32_t x1 = impl_->preview_sample_x1[display_x];
                 uint32_t sum = 0;
-                const uint32_t logical_plane = plane;
-                for (uint32_t sample = 0; sample < sample_count; ++sample) {
-                    const uint32_t x = impl_->preview_sample_x[display_x][sample];
+                for (uint32_t x = x0; x < x1; ++x) {
+                    const uint32_t logical_plane = plane;
                     const uint32_t bit_offset =
                         (x * impl_->packed_pixel_bits) + logical_plane * impl_->bits;
                     const uint32_t byte = bit_offset / 8;
-                const uint32_t channel_bits = impl_->bits;
+                    const uint32_t channel_bits = impl_->bits;
                     const uint32_t shift = 8 - channel_bits - (bit_offset & 7);
                     const uint32_t mask = (1u << channel_bits) - 1u;
                     if (byte < len) {
@@ -345,7 +346,7 @@ void DisplayService::feed_row(uint32_t idx, const uint8_t* data, size_t len) noe
                 }
                 sums[size_t(display_y) * kLcdW + impl_->view_x + display_x] =
                     static_cast<uint16_t>(sums[size_t(display_y) * kLcdW + impl_->view_x + display_x] +
-                                          sum / sample_count);
+                                          sum / (x1 - x0));
             }
             impl_->preview_counts[plane * kLcdH + display_y]++;
         }
@@ -367,13 +368,12 @@ void DisplayService::feed_row(uint32_t idx, const uint8_t* data, size_t len) noe
         uint16_t* sums = impl_->preview_acc +
             (size_t(plane) * kLcdH + display_y) * kLcdW;
         for (uint32_t display_x = 0; display_x < impl_->view_w; ++display_x) {
-            // The LCD is only a 240px preview. Two evenly spaced samples per
-            // preview pixel preserve recognizable detail without repeatedly
-            // dividing or scanning all source pixels on the TCP RX path.
-            const uint32_t sample_count = impl_->preview_sample_count[display_x];
+            // Area-average the full source interval covered by this LCD pixel
+            // to preserve halftone and fine-detail information.
+            const uint32_t x0 = impl_->preview_sample_x0[display_x];
+            const uint32_t x1 = impl_->preview_sample_x1[display_x];
             uint32_t sum = 0;
-            for (uint32_t sample = 0; sample < sample_count; ++sample) {
-                const uint32_t x = impl_->preview_sample_x[display_x][sample];
+            for (uint32_t x = x0; x < x1; ++x) {
                 const uint32_t channel_bits = impl_->bits;
                 const uint32_t source_plane = plane;
                 const uint32_t bit_offset = impl_->interleaved
@@ -387,7 +387,7 @@ void DisplayService::feed_row(uint32_t idx, const uint8_t* data, size_t len) noe
                 sum += level * kBitCoverage / mask;
             }
             sums[impl_->view_x + display_x] = static_cast<uint16_t>(
-                sums[impl_->view_x + display_x] + sum / sample_count);
+                sums[impl_->view_x + display_x] + sum / (x1 - x0));
         }
         impl_->preview_counts[count_index]++;
     }
@@ -541,7 +541,8 @@ void DisplayService::render_incremental_() noexcept {
         (!impl_->job_active && !impl_->final_render_pending)) return;
 
     uint32_t display_row = 0;
-    while (display_row < kLcdH) {
+    uint32_t rendered_rows = 0;
+    while (display_row < kLcdH && rendered_rows < kPreviewRowsPerFlush) {
         while (display_row < kLcdH &&
                impl_->preview_revision[display_row] ==
                    impl_->preview_drawn_revision[display_row]) {
@@ -552,7 +553,9 @@ void DisplayService::render_incremental_() noexcept {
         const uint32_t y_start = display_row;
         uint32_t y_end = y_start;
         uint32_t revisions[kBandLines] = {};
-        while (y_end < kLcdH && y_end - y_start < kBandLines &&
+        const uint32_t band_limit = kPreviewRowsPerFlush - rendered_rows < kBandLines
+            ? kPreviewRowsPerFlush - rendered_rows : kBandLines;
+        while (y_end < kLcdH && y_end - y_start < band_limit &&
                impl_->preview_revision[y_end] !=
                    impl_->preview_drawn_revision[y_end]) {
             revisions[y_end - y_start] = impl_->preview_revision[y_end];
@@ -565,6 +568,7 @@ void DisplayService::render_incremental_() noexcept {
                 impl_->preview_drawn_revision[y] = revisions[y - y_start];
             }
         }
+        rendered_rows += y_end - y_start;
         display_row = y_end;
     }
 
@@ -576,6 +580,18 @@ void DisplayService::render_incremental_() noexcept {
         release_job_buffers_();
     }
 }
+
+namespace {
+
+inline uint32_t raster_level(const uint8_t* row, uint32_t bit_offset,
+                             uint32_t bits) noexcept {
+    const uint32_t byte_offset = bit_offset >> 3;
+    const uint32_t shift = 8 - bits - (bit_offset & 7);
+    const uint32_t mask = (1u << bits) - 1u;
+    return ((row[byte_offset] >> shift) & mask) * kBitCoverage / mask;
+}
+
+}  // namespace
 
 void DisplayService::render_frame_() noexcept {
     // 预览渲染:不持长锁(锁会阻塞 rx_task 的 feed_row,导致 TCP 背压)
@@ -610,9 +626,7 @@ void DisplayService::render_frame_() noexcept {
         for (uint32_t yy = y0; yy < y1; ++yy) {
             for (uint32_t p = 0; p < npl; ++p) {
                 const uint32_t stored_row = impl_->interleaved ? yy
-                    : (impl_->sequential_channels
-                        ? p * impl_->h_px + yy
-                        : (impl_->planes > 1 ? p * pxH + yy : yy));
+                    : p * pxH + yy;
                 if (stored_row >= avail) continue;
                 pcnt[p]++;
                 const uint8_t* rowp = impl_->page + size_t(stored_row) * capb;
@@ -623,15 +637,20 @@ void DisplayService::render_frame_() noexcept {
                     if (x1 > w) x1 = w;
                     uint32_t sum = 0;
                     for (uint32_t x = x0; x < x1; ++x) {
-                        const uint32_t display_plane = p;
-                        const uint32_t bit_offset = impl_->interleaved
-                            ? x * impl_->packed_pixel_bits + display_plane * impl_->bits
-                            : x * impl_->bits;
-                        const uint32_t row_offset = bit_offset >> 3;
-                        const uint32_t shift = 8 - impl_->bits - (bit_offset & 7);
-                        const uint32_t mask = (1u << impl_->bits) - 1u;
-                        const uint32_t level = (rowp[row_offset] >> shift) & mask;
-                        sum += level * kBitCoverage / mask;
+                        if (impl_->interleaved) {
+                            const uint32_t bit_offset =
+                                x * impl_->packed_pixel_bits + p * impl_->bits;
+                            const uint32_t byte_offset = bit_offset >> 3;
+                            if (byte_offset < capb) {
+                                sum += raster_level(rowp, bit_offset, impl_->bits);
+                            }
+                        } else {
+                            const uint32_t bit_offset = x * impl_->bits;
+                            const uint32_t byte_offset = bit_offset >> 3;
+                            if (byte_offset < capb) {
+                                sum += raster_level(rowp, bit_offset, impl_->bits);
+                            }
+                        }
                     }
                     acc[p][sx] += sum / (x1 - x0);
                 }
@@ -715,6 +734,9 @@ void DisplayService::flush_task_(void* arg) noexcept {
                 self->render_incremental_();
             }
         }
+        // Explicitly yield between bounded row batches. The renderer runs
+        // above the print task so it can update the panel during fast raster
+        // consumption, but must give the print task regular CPU time as well.
         vTaskDelay(pdMS_TO_TICKS(kFlushPeriodMs));
     }
 }

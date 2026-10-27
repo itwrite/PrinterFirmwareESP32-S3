@@ -837,8 +837,19 @@ void PrintService::bfp_frame_cb_(void* user, const BinFrameParser::Frame& f) noe
         self->buf_carry_len_ += static_cast<uint32_t>(take);
         off += take;
         if (self->buf_carry_len_ == bpr) {
+            // Keep the entire received page for decoupled printing. The
+            // visible preview is advanced by buffered_print_step_ as each
+            // row/pass reaches the simulated printhead, matching the physical
+            // channel-by-channel print order rather than the faster network.
             DisplayService::instance().store_row(self->buf_rows_stored_,
                                                  self->row_carry_, bpr);
+            // Interleaved rows contain all color channels together, so they
+            // can be previewed as soon as the complete row arrives. Planar
+            // rasters are previewed later in actual print/pass order below.
+            if (self->raster_interleaved_) {
+                DisplayService::instance().feed_row(self->buf_rows_stored_,
+                                                    self->row_carry_, bpr);
+            }
             self->buf_rows_stored_++;
             self->buf_carry_len_ = 0;
         }
@@ -884,7 +895,11 @@ void PrintService::buffered_print_step_() noexcept {
         if (row == nullptr) return;
         fp_state_ = crc32_update(fp_state_, row, bpr);
         fp_bytes_ += bpr;
-        DisplayService::instance().feed_row(buf_rows_printed_, row, bpr);
+        // Render in print order: the four logical color planes appear as
+        // successive passes, and the final K pass completes the color image.
+        if (!raster_interleaved_) {
+            DisplayService::instance().feed_row(buf_rows_printed_, row, bpr);
+        }
         RasterMeta m{buf_rows_printed_, 0};
         if (raster_dispatch_planes_) {
             if (raster_rows_per_channel_ == 0) {

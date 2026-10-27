@@ -6,6 +6,7 @@
 //   rx_task     Core0 prio 10 stack 4096（Phase 6）
 //   decode_task Core1 prio 12 stack 6144（Phase 6）
 //   print_task  Core1 prio 14 stack 4096（Phase 6）
+//   display_task Core1 prio 15 stack 3072（incremental SPI preview renderer）
 //   report_task Core0 prio 3  stack 4096（Phase 6）
 // 全部低于系统任务优先级（>=18）。
 // ============================================================================
@@ -26,6 +27,9 @@ inline constexpr UBaseType_t kPrioCtrl = 4;
 inline constexpr UBaseType_t kPrioRx = 10;
 inline constexpr UBaseType_t kPrioDecode = 12;
 inline constexpr UBaseType_t kPrioPrint = 14;
+// The display renderer must preempt the buffered print loop: taskYIELD only
+// schedules equal-priority tasks and otherwise starves incremental previews.
+inline constexpr UBaseType_t kPrioDisplay = 15;
 inline constexpr UBaseType_t kPrioReport = 3;
 
 inline constexpr uint32_t kStackCtrl = 16384;  // AirPrint/mDNS/control responses need margin
