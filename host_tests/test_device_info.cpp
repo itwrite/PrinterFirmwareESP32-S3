@@ -77,7 +77,9 @@ int main() {
     // printhead：未知 -> null + is_configured:false（禁止编造）
     CHECK_TRUE(out.find(R"("printhead":{"brand":null,"model":null,"nozzle_count":null,)"
                          R"("dpi":null,"print_width_px":null,"print_width_um":null,"pixel_format":null,)"
-                        R"("is_configured":false)") != std::string::npos);
+                         R"("print_height_px":null,"bytes_per_row_min":null,"bytes_per_row_max":null,)") != std::string::npos);
+    CHECK_TRUE(out.find(R"("bits_per_channel":null,"channel_count":null,"raster_layout":null,)") != std::string::npos);
+    CHECK_TRUE(out.find(R"("channel_order":null,"print_channels_sequentially":null,)" ) != std::string::npos);
 
     // memory
     CHECK_TRUE(out.find(R"("memory":{"psram_available":true,"psram_total_bytes":8388608,)"
@@ -108,7 +110,7 @@ int main() {
 
     // ---- 3. commands 元数据与 schema 同源 ----
     CHECK_EQ(count_of(out, "\"cmd\":\""), 7u);
-    CHECK_EQ(count_of(out, "\"key\":\""), 15u);  // start_print增加transport
+    CHECK_EQ(count_of(out, "\"key\":\""), 17u);  // raster metadata
     CHECK_TRUE(near_after(out, "\"cmd\":\"cut_paper\"", "\"supported\":false"));
     CHECK_TRUE(near_after(out, "\"cmd\":\"feed_paper\"", "\"supported\":true"));
     CHECK_TRUE(near_after(out, "\"cmd\":\"start_print\"", "\"supported\":true"));

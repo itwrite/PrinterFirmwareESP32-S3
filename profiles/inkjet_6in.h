@@ -19,6 +19,7 @@ inline constexpr PrintProfile kInkjet6in = {
     .pixel_format = PixelFormat::CMYK8,
     .pixel_format_name = "cmyk8",
     .print_width_px = 1800,         // 6in × 300dpi
+    .print_height_px = 0,
     .dpi = 300,
     .bytes_per_row_min = 1,
     .bytes_per_row_max = 0,         // 由 print_width_px × bpp 推导
@@ -34,6 +35,11 @@ inline constexpr PrintProfile kInkjet6in = {
     .has_cutter = false,
     .has_auto_feed = false,
     .sensors = SensorFlags::None,
+    .raster_layout = RasterLayout::Interleaved,
+    .channel_count = 4,
+    .channel_order = {RasterChannel::Cyan, RasterChannel::Magenta,
+                      RasterChannel::Yellow, RasterChannel::Black},
+    .print_channels_sequentially = false,
 };
 
 }  // namespace profiles

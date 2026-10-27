@@ -90,6 +90,7 @@ private:
     uint32_t random_state_ = 0;
     uint32_t row_bytes_ = 0;
     uint32_t next_row_index_ = 0;
+    uint8_t next_plane_index_ = 0;
     uint32_t effective_row_period_us_ = 5000;  // begin() 时由 rows_per_second 或 config 推导
     bool configured_ = false;
     bool stopped_ = false;

@@ -129,7 +129,7 @@ IPrintheadHal
 
 ### 5.1 逻辑输入格式
 
-第一阶段 Mock 采用明确的、可测试的逻辑格式：
+AirPrint 的逻辑 Mock 采用明确的、可测试的 CMYK8 格式：
 
 ```text
 PixelFormat: CMYK8
@@ -156,8 +156,9 @@ virtual_nozzles_per_ch   = 2480 (software pressure model)
 virtual_total_nozzles    = 9920 (software pressure model)
 ```
 
-当前 A4 logical Mock 的输入固定为整页 CMYK8 interleaved 行。它不代表真实喷头
-拥有 2480 个物理喷嘴，也不代表真实 MH5440 覆盖 A4。
+AirPrint 的 A4 logical Mock 输入是整页 CMYK8 interleaved 行。IJPD 默认 Profile
+则使用 C/M/Y/K 四个 1-bit 平面依次打印；两条路径都不代表真实喷头拥有
+2480 个物理喷嘴，也不代表真实 MH5440 覆盖 A4。
 
 建议提供两种模式：
 
@@ -171,9 +172,10 @@ virtual_total_nozzles    = 9920 (software pressure model)
 
 ### 5.3 A4 logical Mock 模型
 
-当前软件 Mock 明确选择 A4@300 DPI 的整页逻辑输入：`2480×3508 px`、CMYK8
-interleaved、`9920 bytes/row`。这只是协议、流水线和显示的压力模型，不代表单个
-真实 MH5440 喷头可以覆盖整张 A4，也不代表真实 carriage/head array 结构。
+AirPrint 软件 Mock 选择 A4@300 DPI 的整页逻辑输入：`2480×3508 px`、CMYK8
+interleaved、`9920 bytes/row`。IJPD 默认输入为四个 1-bit 平面，单平面
+`310 bytes/row`，按 C/M/Y/K 顺序分别打印。这些只是协议、流水线和显示模型，
+不代表单个真实 MH5440 喷头可以覆盖整张 A4，也不代表真实 carriage/head array 结构。
 
 ## 6. Mock 行处理模型
 

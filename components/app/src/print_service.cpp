@@ -132,11 +132,24 @@ Err PrintService::os_print_row(void* user, const uint8_t* row, size_t len,
     auto* self = static_cast<PrintService*>(user);
     self->fp_state_ = crc32_update(self->fp_state_, row, len);
     self->fp_bytes_ += len;
-    // 还原显示:行数据同步进屏幕页缓存(非活动任务为空操作)
-    DisplayService::instance().feed_row(row_index, row, len);
     self->last_rx_ms_ = static_cast<uint32_t>(task_layout::now_ms());
-    RasterMeta m{row_index};
-    return self->printhead_hal_->submitRaster(row, len, m);
+    DisplayService::instance().feed_row(row_index, row, len);
+
+    RasterMeta meta{row_index, 0};
+    const uint32_t plane_count = self->raster_channel_count_;
+    if (self->raster_dispatch_planes_) {
+        if (self->raster_rows_per_channel_ == 0) return Err::INVALID_ARGUMENT;
+        if (self->raster_sequential_) {
+            meta.plane_index = static_cast<uint8_t>(row_index / self->raster_rows_per_channel_);
+            meta.row_index = row_index % self->raster_rows_per_channel_;
+        } else {
+            meta.plane_index = static_cast<uint8_t>(row_index / self->raster_rows_per_channel_);
+            meta.row_index = row_index % self->raster_rows_per_channel_;
+        }
+        if (meta.plane_index >= plane_count) return Err::INVALID_ARGUMENT;
+    }
+    const Err print_result = self->printhead_hal_->submitRaster(row, len, meta);
+    return print_result;
 }
 
 // ---------------------------------------------------------------- 事件
@@ -364,37 +377,57 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     cfg.slot_size = cfg::SLOT_SIZE;
     cfg.row_carry = self->row_carry_;
 
-    // 页缓存直通判定:整页可放入常驻显示页缓存(与显示共享同一块 PSRAM)
-    // → 接收全速、打印定速、边收边显,绕开槽池背压。
-    const bool cmyk8_interleaved =
-        self->profile_ != nullptr && self->profile_->pixel_format == PixelFormat::CMYK8 &&
-        p.bytes_per_row == static_cast<uint32_t>(self->profile_->print_width_px) * 4;
-    const uint32_t d_bits = cmyk8_interleaved ? 8 : (p.pixel_bits == 8 ? 8 : 1);
-    const uint32_t d_planes = cmyk8_interleaved ? 4 : (p.image_planes == 0 ? 1 : p.image_planes);
-    const uint32_t d_width = cmyk8_interleaved
-                                 ? self->profile_->print_width_px
-                                 : p.bytes_per_row * 8 / d_bits;
-    RasterChannel cmyk_order[4] = {RasterChannel::Cyan, RasterChannel::Magenta,
-                                   RasterChannel::Yellow, RasterChannel::Black};
-    const RasterChannel* display_order = cmyk8_interleaved
-                                             ? cmyk_order
-                                             : p.channel_order;
-    const uint32_t display_order_count = cmyk8_interleaved ? 4 : p.channel_order_count;
-    const uint32_t display_bpp = cmyk8_interleaved ? 4 : 1;
-    const uint32_t display_width_um = cmyk8_interleaved ? self->profile_->print_width_um : 0;
+    // Generic raster contract is populated once from the selected head profile
+    // and request metadata. Both display and printhead receive rows from the
+    // same page cache; each consumer owns its own interpretation of that row.
+    const uint32_t d_bits = p.pixel_bits > 0 ? p.pixel_bits : 1;
+    const uint32_t d_planes = p.image_planes > 0 ? p.image_planes : 1;
+    const uint32_t d_width = self->profile_ != nullptr
+        ? self->profile_->print_width_px
+        : (p.raster_layout == RasterLayout::Interleaved
+            ? p.bytes_per_row * 8 / (d_bits * d_planes)
+            : p.bytes_per_row * 8 / d_bits);
+    const RasterLayout raster_layout = self->profile_ != nullptr
+        ? self->profile_->raster_layout : p.raster_layout;
+    const uint32_t packed_pixel_bits = raster_layout == RasterLayout::Interleaved
+        ? d_bits * d_planes : 0;
+    const uint32_t profile_rows = self->profile_ != nullptr && self->profile_->print_height_px > 0
+        ? self->profile_->print_height_px
+        : (raster_layout == RasterLayout::Planar ? p.total_rows / d_planes : p.total_rows);
+    const uint32_t display_rows = profile_rows;
+    RasterChannel display_order[8] = {};
+    for (uint32_t i = 0; i < d_planes && i < 8; ++i) {
+        display_order[i] = p.channel_order_count > i
+            ? p.channel_order[i] : RasterChannel::Black;
+    }
+    const uint32_t display_width_um = self->profile_ != nullptr
+        ? self->profile_->print_width_um : 0;
     const uint32_t display_dpi = self->profile_ != nullptr ? self->profile_->dpi : 0;
-    const uint32_t display_rows = cmyk8_interleaved
-                                      ? p.total_rows
-                                      : p.total_rows / d_planes;
-    const bool fits_page =
-        d_planes <= 4 && p.bytes_per_row <= 384 &&
-        display_rows <= 4000 && (cmyk8_interleaved || p.total_rows % d_planes == 0);
-    self->buffered_ =
-        p.transport != StartPrintTransport::Ble && fits_page && DisplayService::instance().begin_job(
-                          d_width, display_rows, d_bits, d_planes,
-                          p.bytes_per_row, display_order, display_order_count,
-                          cmyk8_interleaved, display_bpp, display_width_um,
-                          display_dpi) == Err::OK;
+    // Buffered printing requires the complete raster page to fit the shared
+    // display cache. Larger interleaved rows stay on the streaming pipeline;
+    // the display can still preview each row while the HAL consumes it.
+    const bool fits_page = d_planes <= 4 && p.bytes_per_row <= 384 &&
+        display_rows <= 4000;
+    self->raster_channel_count_ = static_cast<uint8_t>(d_planes);
+    self->raster_planar_ = raster_layout == RasterLayout::Planar;
+    self->raster_interleaved_ = raster_layout == RasterLayout::Interleaved;
+    self->raster_layout_ = raster_layout;
+    self->raster_bits_per_channel_ = d_bits;
+    self->raster_bytes_per_pixel_ = p.bytes_per_pixel;
+    for (uint32_t i = 0; i < d_planes && i < 4; ++i) {
+        self->raster_channel_order_[i] = display_order[i];
+    }
+    self->raster_dispatch_planes_ = self->raster_planar_ && self->raster_channel_count_ > 1;
+    self->raster_sequential_ = self->raster_dispatch_planes_ &&
+        self->profile_ != nullptr && self->profile_->print_channels_sequentially;
+    self->raster_rows_per_channel_ = profile_rows;
+    self->buffered_ = p.transport != StartPrintTransport::Ble && fits_page &&
+    DisplayService::instance().begin_job(
+            d_width, display_rows, d_bits, d_planes, p.bytes_per_row,
+            display_order, d_planes,
+            raster_layout == RasterLayout::Interleaved,
+            p.bytes_per_pixel > 0 ? p.bytes_per_pixel : 1,
+            display_width_um, display_dpi, packed_pixel_bits) == Err::OK;
     if (self->buffered_) {
         // 直通模式:不走槽池流水线,本地帧解析 + 页缓存
         self->buf_cfg_ = BinFrameParser::JobConfig{};
@@ -439,7 +472,23 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
     os.on_packet = os_on_packet;
     os.on_event = os_on_event;
 
-    PrintheadConfig ph{p.bytes_per_row, 10000, 0};  // Mock: 1ms tick floor
+    PrintheadConfig ph{};
+    ph.row_bytes = p.bytes_per_row;
+    ph.rows_per_second = 10000;
+    ph.rows_per_plane = self->raster_rows_per_channel_;
+    ph.plane_count = static_cast<uint8_t>(d_planes);
+    ph.channel_count = static_cast<uint8_t>(self->profile_ != nullptr
+        ? self->profile_->channel_count : d_planes);
+    ph.pixel_bits = static_cast<uint8_t>(self->profile_ != nullptr
+        ? self->profile_->bits_per_channel() : d_bits);
+    ph.pixel_width = d_width;
+    ph.raster_layout = raster_layout;
+    ph.sequential_channels = self->raster_sequential_;
+    ph.dispatch_planar_rows = self->raster_dispatch_planes_;
+    for (uint32_t i = 0; i < ph.channel_count && i < 4; ++i) {
+        ph.channel_order[i] = self->profile_ != nullptr
+            ? self->profile_->channel_order[i] : display_order[i];
+    }
     (void)self->printhead_hal_->begin(ph);
 
     if (!self->buffered_) {
@@ -447,8 +496,10 @@ Err PrintService::hook_start_print(void* user, const StartPrintParams& p,
         if (p.bytes_per_row > 0 && display_rows > 0) {
             (void)DisplayService::instance().begin_job(
                 d_width, display_rows, d_bits, d_planes, p.bytes_per_row,
-                display_order, display_order_count, cmyk8_interleaved, display_bpp,
-                display_width_um, display_dpi);
+                display_order, d_planes,
+                raster_layout == RasterLayout::Interleaved,
+                p.bytes_per_pixel > 0 ? p.bytes_per_pixel : 1,
+                display_width_um, display_dpi, packed_pixel_bits);
         }
     }
 
@@ -808,7 +859,8 @@ void PrintService::bfp_frame_cb_(void* user, const BinFrameParser::Frame& f) noe
         ev.stats.packets_received = self->buf_pkts_;
         ev.stats.packets_decoded = self->buf_pkts_;
         ev.stats.bytes_decoded = self->buf_recv_bytes_;
-        ev.stats.bytes_printed = 0;  // 打印进度由独立事件持续上报
+        ev.stats.bytes_printed = self->buf_rows_printed_ *
+            (self->buf_cfg_.total_bytes_uncompressed / self->buf_total_rows_);
         self->enqueue_event_(ev);
     }
 }
@@ -833,7 +885,15 @@ void PrintService::buffered_print_step_() noexcept {
         fp_state_ = crc32_update(fp_state_, row, bpr);
         fp_bytes_ += bpr;
         DisplayService::instance().feed_row(buf_rows_printed_, row, bpr);
-        RasterMeta m{buf_rows_printed_};
+        RasterMeta m{buf_rows_printed_, 0};
+        if (raster_dispatch_planes_) {
+            if (raster_rows_per_channel_ == 0) {
+                finish_buffered_(PrintPipeline::Event::Kind::Failed, Err::INVALID_ARGUMENT);
+                return;
+            }
+            m.plane_index = static_cast<uint8_t>(buf_rows_printed_ / raster_rows_per_channel_);
+            m.row_index = buf_rows_printed_ % raster_rows_per_channel_;
+        }
         const Err e = printhead_hal_->submitRaster(row, bpr, m);
         if (e != Err::OK) {
             finish_buffered_(PrintPipeline::Event::Kind::Failed, Err::HAL_FAULT);
@@ -1214,7 +1274,10 @@ void PrintService::print_task_(void* arg) noexcept {
     while (self->running_) {
         if (self->buf_printing_) {
             self->buffered_print_step_();
-            vTaskDelay(pdMS_TO_TICKS(1));
+            // The printhead HAL owns raster pacing. Adding a one-tick delay
+            // here serialized an extra millisecond after every synchronous
+            // mock row and cut the effective print rate roughly in half.
+            taskYIELD();
             continue;
         }
         const auto r = self->pipeline_.print_pump();

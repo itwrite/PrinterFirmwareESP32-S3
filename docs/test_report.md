@@ -55,7 +55,7 @@ host bridge 现在按 decoder 完成页数填充 IPP `pages-completed`，并在 
 host/opt-in Core 验证，不会调用 ESP32 printer HAL。
 
 `MockRicohMh5440Hal` 已接入默认 `main/app_main.cpp` Profile 和 `PrinterHalBundle`；
-默认 ESP32 镜像运行 RICOH MH5440 logical CMYK8 Mock。该 Ricoh Mock 只验证 CMYK8
+默认 ESP32 镜像运行 RICOH MH5440 logical CMYK1 four-pass Mock。该 Ricoh Mock 只验证 CMYK1
 逻辑行、通道统计/CRC、确定性故障和生命周期，不代表真实喷头电气驱动；真实喷头
 `printhead.is_configured` 仍保持 `false`，直到厂商电气资料和真实控制器完成闭合。
 

@@ -74,18 +74,45 @@ int main() {
         // 喷墨 Profile：raster OK
         p.bytes_per_row = 48;
         p.total_rows = 10;
+        p.pixel_bits = 8;
+        p.pixel_bits_supplied = true;
+        p.image_planes = 4;
+        p.image_planes_supplied = true;
+        p.channel_order_count = 4;
+        p.channel_order[0] = RasterChannel::Cyan;
+        p.channel_order[1] = RasterChannel::Magenta;
+        p.channel_order[2] = RasterChannel::Yellow;
+        p.channel_order[3] = RasterChannel::Black;
+        p.bytes_per_row = profiles::kInkjet6in.expected_bytes_per_row();
+        p.bytes_per_pixel = profiles::kInkjet6in.expected_bytes_per_pixel();
+        p.bytes_per_pixel_supplied = true;
+        p.total_rows = 10;
+        p.total_bytes_uncompressed = p.bytes_per_row * p.total_rows;
+        p.raster_layout = RasterLayout::Interleaved;
         CHECK_TRUE(CommandRouter::finalize_start_print(
                        &p, &profiles::kInkjet6in, &msg) == Err::OK);
 
         StartPrintParams ricoh = p;
-        ricoh.bytes_per_row = 9920;
-        ricoh.total_rows = 2;
-        ricoh.total_bytes_uncompressed = 19840;
+        ricoh.bytes_per_row = 310;
+        ricoh.total_rows = 4 * 8;
+        ricoh.total_bytes_uncompressed = 310 * 4 * 8;
+        ricoh.pixel_bits = 1;
+        ricoh.image_planes = 4;
+        ricoh.channel_order_count = 4;
+        ricoh.channel_order[0] = RasterChannel::Cyan;
+        ricoh.channel_order[1] = RasterChannel::Magenta;
+        ricoh.channel_order[2] = RasterChannel::Yellow;
+        ricoh.channel_order[3] = RasterChannel::Black;
+        ricoh.pixel_bits_supplied = true;
+        ricoh.image_planes_supplied = true;
+        ricoh.bytes_per_pixel = 0;
+        ricoh.bytes_per_pixel_supplied = true;
+        ricoh.raster_layout = RasterLayout::Planar;
         CHECK_TRUE(profiles::kRicohMh5440Mock.validate() == Err::OK);
         CHECK_TRUE(CommandRouter::finalize_start_print(
                        &ricoh, &profiles::kRicohMh5440Mock, &msg) == Err::OK);
         CHECK_EQ(profiles::kRicohMh5440Mock.print_width_px, 2480u);
-        CHECK_EQ(profiles::kRicohMh5440Mock.effective_bpr_max(4), 9920u);
+        CHECK_EQ(profiles::kRicohMh5440Mock.effective_bpr_max(0), 310u);
 
         // escpos 模式：热敏支持，喷墨拒绝
         p.mode = StartPrintMode::EscPos;

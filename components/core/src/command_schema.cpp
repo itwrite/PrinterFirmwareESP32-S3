@@ -68,6 +68,7 @@ constexpr const char* const kIntegrityOpts[] = {"none", "crc32"};
 // ---- 参数表 ----
 constexpr const char* const kModeOpts[] = {"raster", "escpos"};
 constexpr const char* const kTransportOpts[] = {"tcp", "mqtt", "ble"};
+constexpr const char* const kRasterLayoutOpts[] = {"planar", "interleaved"};
 
 constexpr ParamSpec kStartPrintParams[] = {
     p_str("job_id", "任务 ID", "本次打印任务的标识，仅允许 [A-Za-z0-9_-]",
@@ -93,7 +94,10 @@ constexpr ParamSpec kStartPrintParams[] = {
     p_int("pixel_bits", "像素位深", "还原显示用:1=1-bit,8=8-bit(缺省 1)",
           false, 0, 8, nullptr),
     p_int("image_planes", "通道平面数", "还原显示用:光栅平面数(缺省 1)",
-           false, 0, 8, nullptr),
+            false, 0, 8, nullptr),
+    p_int("bytes_per_pixel", "每像素字节数", "交错光栅每个像素的总字节数", false, 0, 32, nullptr),
+    p_enum("raster_layout", "光栅布局", "planar=平面;interleaved=交错",
+           false, kRasterLayoutOpts, 2, nullptr),
     p_string_array("channel_order", "通道顺序", "还原显示用:每个光栅平面的通道名",
                    false, 1, 8),
     p_bool("cutter_after_finish", "完成后切纸", "设备不支持切纸时任务以警告完成",

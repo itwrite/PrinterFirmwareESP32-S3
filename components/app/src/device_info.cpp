@@ -46,6 +46,19 @@ bool write_printhead_section(JsonWriter& w, const PrintProfile* pf) noexcept {
         if (!w.kv_i64("print_width_px", pf->print_width_px)) return false;
         if (!w.kv_i64("print_width_um", pf->print_width_um)) return false;
         if (!w.kv_cstr("pixel_format", pf->pixel_format_name)) return false;
+        if (!w.kv_i64("bytes_per_row_min", pf->bytes_per_row_min)) return false;
+        if (!w.kv_i64("bytes_per_row_max", pf->bytes_per_row_max)) return false;
+        if (!w.kv_i64("print_height_px", pf->print_height_px)) return false;
+        if (!w.kv_i64("bits_per_channel", pf->bits_per_channel())) return false;
+        if (!w.kv_i64("channel_count", pf->channel_count)) return false;
+        if (!w.kv_cstr("raster_layout", pf->raster_layout == RasterLayout::Interleaved
+                                             ? "interleaved" : "planar")) return false;
+        if (!w.kv_bool("print_channels_sequentially", pf->print_channels_sequentially)) return false;
+        if (!w.key("channel_order") || !w.begin_array()) return false;
+        for (uint8_t i = 0; i < pf->channel_count; ++i) {
+            if (!w.value_cstr(raster_channel_name(pf->channel_order[i]))) return false;
+        }
+        if (!w.end_array()) return false;
         if (!w.kv_bool("is_configured", false)) return false;  // Mock 阶段
     } else {
         // 无 Profile:全部 null,禁止编造。
@@ -54,7 +67,11 @@ bool write_printhead_section(JsonWriter& w, const PrintProfile* pf) noexcept {
         if (!w.kv_null("brand") || !w.kv_null("model") || !w.kv_null("nozzle_count") ||
              !w.kv_null("dpi") || !w.kv_null("print_width_px") ||
              !w.kv_null("print_width_um") ||
-            !w.kv_null("pixel_format")) {
+            !w.kv_null("pixel_format") || !w.kv_null("print_height_px") ||
+            !w.kv_null("bytes_per_row_min") || !w.kv_null("bytes_per_row_max") ||
+            !w.kv_null("bits_per_channel") || !w.kv_null("channel_count") ||
+            !w.kv_null("raster_layout") || !w.kv_null("channel_order") ||
+            !w.kv_null("print_channels_sequentially")) {
             return false;
         }
         if (!w.kv_bool("is_configured", false)) return false;
@@ -78,8 +95,8 @@ bool write_capabilities_section(JsonWriter& w, const DeviceInfo& di) noexcept {
     const PrintProfile* pf = di.profile;
     if (!w.key("capabilities") || !w.begin_object()) return false;
     if (!w.kv_cstr("printer_type", pf != nullptr ? pf->type_name : "inkjet")) return false;
-    if (!w.kv_bool("color", pf != nullptr ? pf->pixel_format != PixelFormat::Mono1
-                                          : true)) return false;
+     if (!w.kv_bool("color", pf != nullptr ? pf->pixel_format != PixelFormat::Mono1
+                                           : true)) return false;
     if (!w.key("data_modes") || !w.begin_array()) return false;
     if (pf == nullptr || has_mode(pf->data_modes, DataMode::Raster)) {
         if (!w.value_cstr("raster")) return false;

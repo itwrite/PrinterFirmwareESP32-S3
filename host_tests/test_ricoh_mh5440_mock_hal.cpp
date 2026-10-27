@@ -104,6 +104,59 @@ int main() {
     CHECK_EQ(delay_state.delays[1], 5u);
     CHECK_EQ(delay_state.delays[2], 5u);
 
+    // At fast configured rates the millisecond DelayFn must not quantize
+    // every row up to 1ms (which would cap throughput at 1000 rows/s).
+    {
+        DelayState fast_delay_state;
+        MockRicohMh5440Hal fast_hal(small_config(), record_delay, &fast_delay_state);
+        PrintheadConfig fast_cfg = begin_config();
+        fast_cfg.rows_per_second = 10000;
+        CHECK_TRUE(fast_hal.begin(fast_cfg) == Err::OK);
+        CHECK_TRUE(fast_hal.submitRaster(first.data(), first.size(), RasterMeta{0}) == Err::OK);
+        CHECK_TRUE(fast_delay_state.delays.empty());
+    }
+
+    // CMYK1 is printed as four sequential 1-bit passes, preserving C/M/Y/K order.
+    {
+        RicohMh5440MockConfig planar_config = small_config();
+        planar_config.row_bytes = 0;
+        MockRicohMh5440Hal planar_hal(planar_config);
+        PrintheadConfig planar_begin;
+        planar_begin.row_bytes = 1;
+        planar_begin.rows_per_plane = 2;
+        planar_begin.plane_count = 4;
+        planar_begin.channel_count = 4;
+        planar_begin.pixel_bits = 1;
+        planar_begin.pixel_width = 4;
+        planar_begin.raster_layout = RasterLayout::Planar;
+        planar_begin.sequential_channels = true;
+        planar_begin.channel_order[0] = RasterChannel::Cyan;
+        planar_begin.channel_order[1] = RasterChannel::Magenta;
+        planar_begin.channel_order[2] = RasterChannel::Yellow;
+        planar_begin.channel_order[3] = RasterChannel::Black;
+        CHECK_TRUE(planar_hal.begin(planar_begin) == Err::OK);
+        CHECK_EQ(planar_hal.row_bytes(), 1u);
+        const uint8_t c_rows[] = {0xA0, 0x50};
+        const uint8_t m_rows[] = {0xF0, 0x00};
+        const uint8_t y_rows[] = {0x00, 0xF0};
+        const uint8_t k_rows[] = {0xC0, 0x30};
+        const uint8_t* passes[] = {c_rows, m_rows, y_rows, k_rows};
+        for (uint8_t channel = 0; channel < 4; ++channel) {
+            for (uint32_t row = 0; row < 2; ++row) {
+                CHECK_TRUE(planar_hal.submitRaster(
+                    &passes[channel][row], 1, RasterMeta{row, channel}) == Err::OK);
+            }
+        }
+        CHECK_EQ(planar_hal.stats().rows_accepted, 8u);
+        CHECK_EQ(planar_hal.stats().bytes_accepted, 8u);
+        CHECK_EQ(planar_hal.stats().nonzero_pixels[0], 4u);
+        CHECK_EQ(planar_hal.stats().nonzero_pixels[1], 4u);
+        CHECK_EQ(planar_hal.stats().nonzero_pixels[2], 4u);
+        CHECK_EQ(planar_hal.stats().nonzero_pixels[3], 4u);
+        CHECK_TRUE(planar_hal.submitRaster(c_rows, 1, RasterMeta{0, 0}) ==
+                   Err::INVALID_ARGUMENT);
+    }
+
     // Input contract: short rows and non-monotonic row indices are rejected.
     MockRicohMh5440Hal input_hal(small_config());
     CHECK_TRUE(input_hal.begin(begin_config()) == Err::OK);
@@ -132,13 +185,23 @@ int main() {
     RicohMh5440MockConfig missing = small_config();
     missing.missing_nozzle_ppm = 1000000;
     MockRicohMh5440Hal missing_hal(missing);
-    CHECK_TRUE(missing_hal.begin(begin_config()) == Err::OK);
+    PrintheadConfig missing_begin = begin_config();
+    missing_begin.pixel_bits = 8;
+    missing_begin.channel_count = 4;
+    missing_begin.plane_count = 4;
+    missing_begin.pixel_width = 4;
+    missing_begin.raster_layout = RasterLayout::Interleaved;
+    missing_begin.channel_order[0] = RasterChannel::Cyan;
+    missing_begin.channel_order[1] = RasterChannel::Magenta;
+    missing_begin.channel_order[2] = RasterChannel::Yellow;
+    missing_begin.channel_order[3] = RasterChannel::Black;
+    CHECK_TRUE(missing_hal.begin(missing_begin) == Err::OK);
     CHECK_TRUE(missing_hal.submitRaster(first.data(), first.size(), RasterMeta{0}) == Err::OK);
     const RicohMh5440MockStats missing_stats = missing_hal.stats();
     CHECK_EQ(missing_stats.nonzero_pixels[0], 0u);
     CHECK_EQ(missing_stats.intensity_sum[3], 0u);
-    CHECK_EQ(missing_stats.missing_nozzle_drops[0], 4u);
-    CHECK_EQ(missing_stats.missing_nozzle_drops[3], 4u);
+    CHECK_EQ(missing_stats.missing_nozzle_drops[0], 3u);
+    CHECK_EQ(missing_stats.missing_nozzle_drops[3], 3u);
     CHECK_EQ(missing_stats.channel_crc32[0], channel_crc(first, {}, 0));
 
     // Row and byte fault injection happen deterministically at the configured boundary.

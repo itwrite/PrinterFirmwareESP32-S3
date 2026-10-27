@@ -20,6 +20,7 @@
 
 #include "core/config_limits.h"
 #include "core/errors.h"
+#include "core/raster_channels.h"
 
 namespace ijpd {
 
@@ -39,6 +40,13 @@ enum class PixelFormat : uint8_t {
     RGB565 = 2,   // 16 bit/px
     RGB888 = 3,   // 24 bit/px
     CMYK8 = 4,    // 32 bit/px（喷墨）
+    CMYK1 = 5,    // 四个独立 1-bit 平面，依次 C/M/Y/K 多遍打印
+    Unknown = 0xFF,
+};
+
+enum class RasterLayout : uint8_t {
+    Planar = 0,       // 每个通道为独立平面，按 channel_order 顺序排列
+    Interleaved = 1,  // 同一像素各通道交错存储
     Unknown = 0xFF,
 };
 
@@ -83,6 +91,7 @@ struct PrintProfile {
     PixelFormat pixel_format = PixelFormat::Mono1;
     const char* pixel_format_name = "mono1";
     uint16_t print_width_px = 0;          // 最大打印宽度（像素）
+    uint32_t print_height_px = 0;         // Maximum native raster height; zero means unspecified.
     uint32_t print_width_um = 0;           // 喷头/打印区域逻辑宽度（微米，0=未知）
     uint16_t dpi = 0;
     uint16_t bytes_per_row_min = 1;       // 行字节数下限（0 = 不限）
@@ -99,6 +108,43 @@ struct PrintProfile {
     bool has_cutter = false;
     bool has_auto_feed = false;
     SensorFlags sensors = SensorFlags::None;
+
+    // Raster contract and print-head scheduling, independent of model name.
+    RasterLayout raster_layout = RasterLayout::Planar;
+    uint8_t channel_count = 1;
+    RasterChannel channel_order[4] = {RasterChannel::Black};
+    bool print_channels_sequentially = false;
+
+    uint8_t bits_per_channel() const noexcept {
+        switch (pixel_format) {
+            case PixelFormat::Mono1:
+            case PixelFormat::CMYK1: return 1;
+            case PixelFormat::Mono8:
+            case PixelFormat::CMYK8: return 8;
+            default: return 0;
+        }
+    }
+
+    uint32_t expected_bytes_per_row() const noexcept {
+        const uint32_t channel_bits = bits_per_channel();
+        if (channel_bits == 0 || channel_count == 0) return 0;
+        if (raster_layout == RasterLayout::Interleaved) {
+            return (static_cast<uint32_t>(print_width_px) * channel_bits * channel_count + 7) / 8;
+        }
+        return (static_cast<uint32_t>(print_width_px) * channel_bits + 7) / 8;
+    }
+
+    uint32_t expected_bytes_per_pixel() const noexcept {
+        if (raster_layout != RasterLayout::Interleaved) return 0;
+        const uint32_t bits = static_cast<uint32_t>(bits_per_channel()) * channel_count;
+        return (bits + 7) / 8;
+    }
+
+    uint32_t expected_total_rows() const noexcept {
+        if (print_height_px == 0) return 0;
+        return print_height_px *
+            (raster_layout == RasterLayout::Planar ? channel_count : 1);
+    }
 
     // ---- 校验 ----
     // Profile 自身合法性（init 时调用一次）
@@ -122,6 +168,8 @@ struct PrintProfile {
     // bytes_per_row 上限（显式值或由宽度推导）
     uint32_t effective_bpr_max(uint8_t bytes_per_pixel) const noexcept {
         if (bytes_per_row_max != 0) return bytes_per_row_max;
+        const uint32_t expected = expected_bytes_per_row();
+        if (expected != 0) return expected;
         if (bytes_per_pixel == 0) return cfg::MAX_PACKET_UNCOMPRESSED_SIZE;
         return static_cast<uint32_t>(print_width_px) * bytes_per_pixel;
     }
@@ -134,6 +182,7 @@ struct PrintProfile {
             case PixelFormat::RGB565: return 2;
             case PixelFormat::RGB888: return 3;
             case PixelFormat::CMYK8:  return 4;
+            case PixelFormat::CMYK1:  return 0;  // 平面位图，按每行位打包
             default:                  return 0;
         }
     }
@@ -161,6 +210,7 @@ inline PixelFormat pixel_format_from_name(const char* name, size_t len) noexcept
     if (len == 5 && __builtin_memcmp(name, "rgb565", 5) == 0) return PixelFormat::RGB565;
     if (len == 6 && __builtin_memcmp(name, "rgb888", 6) == 0) return PixelFormat::RGB888;
     if (len == 5 && __builtin_memcmp(name, "cmyk8", 5) == 0) return PixelFormat::CMYK8;
+    if (len == 5 && __builtin_memcmp(name, "cmyk1", 5) == 0) return PixelFormat::CMYK1;
     return PixelFormat::Unknown;
 }
 

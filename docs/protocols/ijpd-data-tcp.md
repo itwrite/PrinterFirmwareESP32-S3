@@ -142,13 +142,14 @@ sock.sendall(frame_without_crc + crc)
 
 ## 8. 当前默认镜像限制
 
-默认固件使用 `RICOH-MH5440-MOCK` Profile，报告 A4 logical `CMYK8` raster 能力：
-`2480×3508 px`、`9920 bytes/row`、参考 `300 dpi`。这些是逻辑 Mock 契约，
+默认固件使用 `RICOH-MH5440-MOCK` Profile，报告 A4 logical `CMYK1` raster 能力：
+`2480×3508 px`、每通道 `310 bytes/row`、C/M/Y/K 四个 1-bit 平面，参考 `300 dpi`。
+平面按 C、M、Y、K 顺序传输，并由打印服务依次执行四遍输出。这些是逻辑 Mock 契约，
 不是已确认的真实喷头电气规格；客户端仍应读取 `get_device_info`，不要据此推断
 真实波形、电压、连接器或喷嘴时序。
 
 当前推荐路径是 `mode:"raster"` + TCP `9101`。A4 logical Mock 的完整一页约为
-`2480×3508×4 = 34.8 MiB`，发送端应使用 TCP 路径和 LZ4/CRC32；BLE Phase 1
+`ceil(2480/8)×3508×4 = 4.15 MiB`，发送端应使用 TCP 路径和 LZ4/CRC32；BLE Phase 1
 的 `512 KiB` 上限只适合小测试任务。`mode:"escpos"` 虽出现在
 schema 中，但默认镜像不提供可用的 IJPD ESC/POS 流水线；原始 ESC/POS 请使用
 独立 RAW TCP 协议。

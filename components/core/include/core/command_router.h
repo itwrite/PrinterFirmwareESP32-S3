@@ -56,6 +56,11 @@ struct StartPrintParams {
     // 显示还原提示(可选):像素位深与通道平面数(缺省 1/1)
     uint32_t pixel_bits = 1;
     uint32_t image_planes = 1;
+    uint32_t bytes_per_pixel = 0;
+    RasterLayout raster_layout = RasterLayout::Unknown;
+    bool pixel_bits_supplied = false;
+    bool image_planes_supplied = false;
+    bool bytes_per_pixel_supplied = false;
     // Optional raster plane order. Empty preserves the legacy positional order.
     uint8_t channel_order_count = 0;
     RasterChannel channel_order[8] = {};

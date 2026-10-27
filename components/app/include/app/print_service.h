@@ -165,6 +165,15 @@ private:
 
     // ---- 页缓存直通模式(整页缓冲,接收全速/打印定速/边收边显) ----
     bool buffered_ = false;
+    bool raster_dispatch_planes_ = false;
+    bool raster_interleaved_ = false;
+    bool raster_planar_ = true;
+    bool raster_sequential_ = false;
+    uint8_t raster_channel_count_ = 1;
+    RasterLayout raster_layout_ = RasterLayout::Unknown;
+    uint32_t raster_bits_per_channel_ = 1;
+    uint32_t raster_bytes_per_pixel_ = 0;
+    RasterChannel raster_channel_order_[4] = {RasterChannel::Black};
     BinFrameParser bfp_rx_;             // 直通模式帧解析器
     volatile bool buf_receiving_ = false;
     volatile bool buf_printing_ = false;
@@ -174,6 +183,7 @@ private:
     volatile uint32_t buf_rows_stored_ = 0;
     volatile uint32_t buf_rows_printed_ = 0;
     uint32_t buf_total_rows_ = 0;
+    uint32_t raster_rows_per_channel_ = 0;
     volatile uint64_t buf_recv_bytes_ = 0;
     volatile uint32_t buf_pkts_ = 0;
     uint64_t buf_started_ms_ = 0;

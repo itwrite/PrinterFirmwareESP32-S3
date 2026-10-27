@@ -408,6 +408,15 @@ Err CommandRouter::finalize_start_print(StartPrintParams* p,
             return Err::INVALID_ARGUMENT;
         }
         if (profile != nullptr) {
+            const uint32_t profile_bytes_per_pixel = profile->expected_bytes_per_pixel();
+            if (p->bytes_per_pixel_supplied && p->bytes_per_pixel != profile_bytes_per_pixel) {
+                *msg = "bytes_per_pixel does not match the print-head profile";
+                return Err::INVALID_ARGUMENT;
+            }
+            p->bytes_per_pixel = profile_bytes_per_pixel;
+            if (p->raster_layout == RasterLayout::Unknown) {
+                p->raster_layout = profile->raster_layout;
+            }
             // Profile 宽度约束
             const uint32_t bpr_max = profile->effective_bpr_max(profile->bytes_per_pixel());
             if (p->bytes_per_row > bpr_max) {
@@ -418,6 +427,52 @@ Err CommandRouter::finalize_start_print(StartPrintParams* p,
                 *msg = "bytes_per_row is below the printer's minimum";
                 return Err::INVALID_ARGUMENT;
             }
+            const uint32_t expected_bpr = profile->expected_bytes_per_row();
+            if (expected_bpr == 0 || p->bytes_per_row != expected_bpr) {
+                *msg = "bytes_per_row does not match the print-head profile raster format";
+                return Err::INVALID_ARGUMENT;
+            }
+            if (profile->print_height_px != 0 && profile->channel_count != 0) {
+                const uint32_t rows_per_channel = profile->raster_layout == RasterLayout::Planar
+                    ? p->total_rows / profile->channel_count : p->total_rows;
+                if (rows_per_channel > profile->print_height_px) {
+                    *msg = "total_rows does not match the print-head profile raster height";
+                    return Err::INVALID_ARGUMENT;
+                }
+            }
+            if (p->pixel_bits_supplied && p->pixel_bits != profile->bits_per_channel()) {
+                *msg = "pixel_bits does not match the print-head profile";
+                return Err::INVALID_ARGUMENT;
+            }
+            if (p->image_planes_supplied && p->image_planes != profile->channel_count) {
+                *msg = "image_planes does not match the print-head profile";
+                return Err::INVALID_ARGUMENT;
+            }
+            if (p->raster_layout != RasterLayout::Unknown &&
+                p->raster_layout != profile->raster_layout) {
+                *msg = "raster_layout does not match the print-head profile";
+                return Err::INVALID_ARGUMENT;
+            }
+            if (p->channel_order_count != 0) {
+                if (p->channel_order_count != profile->channel_count) {
+                    *msg = "channel_order does not match the print-head profile";
+                    return Err::INVALID_ARGUMENT;
+                }
+                for (uint8_t i = 0; i < p->channel_order_count; ++i) {
+                    if (p->channel_order[i] != profile->channel_order[i]) {
+                        *msg = "channel_order does not match the print-head profile";
+                        return Err::INVALID_ARGUMENT;
+                    }
+                }
+            }
+            if (p->channel_order_count == 0) {
+                p->channel_order_count = profile->channel_count;
+                for (uint8_t i = 0; i < profile->channel_count; ++i) {
+                    p->channel_order[i] = profile->channel_order[i];
+                }
+            }
+            if (!p->pixel_bits_supplied) p->pixel_bits = profile->bits_per_channel();
+            if (!p->image_planes_supplied) p->image_planes = profile->channel_count;
         }
         if (p->channel_order_count != 0 &&
             p->channel_order_count != p->image_planes) {
@@ -548,7 +603,6 @@ Err CommandRouter::dispatch(const CommandSpec& spec, const Envelope& env,
                 parser_.as_bool(h, &p.cutter_after_finish) != Err::OK) {
                 return internal_fail(env, resp, resp_cap, resp_len);
             }
-
             h = parser_.find(env.data, "mode");
             if (h == JsonParser::kNone || parser_.str_equals(h, "raster", 6)) {
                 p.mode = StartPrintMode::Raster;
@@ -581,15 +635,33 @@ Err CommandRouter::dispatch(const CommandSpec& spec, const Envelope& env,
             // 显示还原提示(可选,缺省 1/1)
             p.pixel_bits = 1;
             p.image_planes = 1;
+            p.raster_layout = RasterLayout::Unknown;
             bool image_planes_supplied = false;
             h = parser_.find(env.data, "pixel_bits");
             if (h != JsonParser::kNone && parser_.as_i64(h, &v) == Err::OK && v > 0) {
                 p.pixel_bits = static_cast<uint32_t>(v);
+                p.pixel_bits_supplied = true;
+            }
+            h = parser_.find(env.data, "raster_layout");
+            if (h != JsonParser::kNone) {
+                if (parser_.str_equals(h, "planar", 6)) {
+                    p.raster_layout = RasterLayout::Planar;
+                } else if (parser_.str_equals(h, "interleaved", 11)) {
+                    p.raster_layout = RasterLayout::Interleaved;
+                } else {
+                    return internal_fail(env, resp, resp_cap, resp_len);
+                }
+            }
+            h = parser_.find(env.data, "bytes_per_pixel");
+            if (h != JsonParser::kNone && parser_.as_i64(h, &v) == Err::OK && v >= 0) {
+                p.bytes_per_pixel = static_cast<uint32_t>(v);
+                p.bytes_per_pixel_supplied = true;
             }
             h = parser_.find(env.data, "image_planes");
             if (h != JsonParser::kNone) {
                 if (parser_.as_i64(h, &v) == Err::OK && v > 0) {
                     image_planes_supplied = true;
+                    p.image_planes_supplied = true;
                     p.image_planes = static_cast<uint32_t>(v);
                 }
             }

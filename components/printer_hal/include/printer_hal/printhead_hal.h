@@ -15,6 +15,7 @@
 #include <cstdint>
 
 #include "core/errors.h"
+#include "core/print_profile.h"
 
 namespace ijpd {
 
@@ -23,10 +24,20 @@ struct PrintheadConfig {
     uint32_t rows_per_second = 1;  // Mock：每秒行数
     uint32_t fault_after_rows = 0; // Mock 故障注入：N 行后 HAL_FAULT（0=不注入）
     uint32_t raw_chunk_bytes = 512; // raw 模式每次块大小
+    uint32_t rows_per_plane = 0;   // 多遍栅格时每个颜色平面的行数
+    uint8_t plane_count = 0;
+    uint8_t channel_count = 0;
+    uint8_t pixel_bits = 0;
+    uint32_t pixel_width = 0;
+    RasterLayout raster_layout = RasterLayout::Unknown;
+    bool sequential_channels = false;
+    bool dispatch_planar_rows = false;
+    RasterChannel channel_order[4] = {RasterChannel::Black};
 };
 
 struct RasterMeta {
     uint32_t row_index = 0;
+    uint8_t plane_index = 0;
 };
 
 class IPrintheadHal {

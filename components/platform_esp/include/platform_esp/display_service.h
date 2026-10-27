@@ -12,6 +12,7 @@
 #include <cstdint>
 
 #include "core/errors.h"
+#include "core/print_profile.h"
 #include "core/raster_channels.h"
 
 namespace ijpd {
@@ -32,10 +33,17 @@ public:
                   bool interleaved = false,
                   uint32_t bytes_per_pixel = 1,
                   uint32_t physical_width_um = 0,
-                  uint32_t dpi = 0) noexcept;
+                  uint32_t dpi = 0,
+                  uint32_t packed_pixel_bits = 0) noexcept;
 
     // 打印行到达(单写者:print 任务)。非活动任务时为空操作。
     void feed_row(uint32_t row_index, const uint8_t* data, size_t len) noexcept;
+    void set_raster_contract(const RasterChannel* channel_order,
+                             uint32_t channel_count,
+                             uint32_t bits_per_channel,
+                             bool interleaved,
+                             uint32_t packed_pixel_bits,
+                             bool sequential_channels) noexcept;
 
     // Store a row without advancing the visible preview. Used when transport
     // reception is decoupled from the printhead consumer.

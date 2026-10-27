@@ -16,7 +16,7 @@
 | mDNS/DNS-SD | STA 连网后自动启用 | 发现 IJPD 控制端口 | `_ijpd._tcp` |
 | ESC/POS RAW TCP | 当前关闭，可选 | 发送原始 ESC/POS 字节流 | 默认 TCP `9102` |
 | MQTT 控制/任务分片 | 当前关闭，可选 | 云端控制和承载 IJPD 数据流 | 用户配置 Broker URI/topic |
-| IPP/AirPrint | 默认关闭；需 `AIRPRINT_ENABLE=ON` 显式构建 | 显式构建可启用 query、受限 `image/urf` Print-Job 和 Job 查询，并按需使用 SoftAP 配网；当前接入逻辑 RICOH CMYK8 Mock，不代表真实喷头电气驱动 | 默认无入口 |
+| IPP/AirPrint | 默认关闭；需 `AIRPRINT_ENABLE=ON` 显式构建 | 显式构建可启用 query、受限 `image/urf` Print-Job 和 Job 查询，并按需使用 SoftAP 配网；IPP Raster 独立使用逻辑 CMYK8 Mock，不代表真实喷头电气驱动 | 默认无入口 |
 
 USB Serial/JTAG 当前仅用于固件日志控制台，不提供第三方打印协议。
 
@@ -30,7 +30,7 @@ BLE         enabled, device name IJPD-Printer
 IJPD TCP    enabled, control 9100, data 9101
 RAW TCP     disabled
 MQTT        disabled
-Profile     RICOH-MH5440-MOCK, A4 logical CMYK8 raster, 2480×3508 @ 300 DPI, 9920 bytes/row
+Profile     RICOH-MH5440-MOCK, A4 logical CMYK1 four-pass raster, 2480×3508 @ 300 DPI, 310 bytes/row per plane, C/M/Y/K order
 Model       RICOH-MH5440-MOCK
 Firmware    0.3.0
 ```
@@ -56,7 +56,7 @@ Firmware    0.3.0
 - 大图像必须先 `start_print`，再按响应中的 token 和派生包长发送数据。
 - 控制连接不要在收到 `start_print` 响应后立即关闭；进度和终态事件通过控制通道广播。
 - 所有多字节二进制字段均为 little-endian。
-- 当前默认镜像运行 RICOH MH5440 logical CMYK8 Mock；`get_device_info` 中的能力和硬件状态
+- 当前 IJPD 默认镜像运行 RICOH MH5440 logical CMYK1 四遍 Mock；IPP Raster opt-in 路径仍用 CMYK8 Mock。`get_device_info` 中的能力和硬件状态
   不能当作真实喷头电气规格。
 - 默认固件不支持 IPP/AirPrint、PDF 或通过 HTTP 发送打印任务。显式 AirPrint 构建
   可接收已验证的 `image/urf` Print-Job 并送入逻辑 Mock；不支持 PDF，也不能宣称
