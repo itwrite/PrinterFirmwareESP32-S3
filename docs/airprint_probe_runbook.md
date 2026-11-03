@@ -124,6 +124,8 @@ IPP `client-error-not-found`。
 LCD 预览把完整 Apple Raster 行转换后交给 `DisplayService` 进行面积平均缩放。2026-11-03
 已刷入修复，用户确认条纹消失；golden Print-Job 实机返回 HTTP `200`、IPP
 `successful-ok`、Job `completed`、1 页。
+LCD 空闲时保留最近一次完成的预览；判断新任务是否提交应查询 Job 或检查串口/IPP 请求，
+不能仅依据屏幕仍显示上一张照片。
 
 速度诊断应分别记录 HTTP body 首末时间、解码开始/完成时间和预览行刷新耗时。现有串口
 只记录累计接收字节与任务完成，尚无这些阶段计时，因此不能确定慢在 Wi-Fi 传输、URF

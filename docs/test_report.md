@@ -104,6 +104,7 @@ selector 互操作测试；使用真实 `.../job/<id>` URI 的原始 IPP 请求�
 - Apple Raster literal 数据路径已改为分块拷贝；decoder、Print-Job 和两组 URF golden 测试通过，默认固件构建通过。主机 golden 基准优化后 7 次中位数为 0.126 秒；没有受控的优化前重复基准，不能据此量化性能提升。
 - ESP32-S3 golden URF 实机任务：HTTP `200`、IPP `successful-ok`、Job `completed`、1 页。
 - 用户确认 LCD 条纹已修复。
+- LCD 会在空闲时保留最近一次完成的预览；屏幕仍显示旧照片不代表新的 AirPrint Job 已提交。
 - iPhone 12 / iOS 18.4.1 曾提交约 9.75 MB 的“照片”Job 并完成。
 - iPhone 16 / iOS 26.5.2 报告设备列表加载慢、曾出现两个同名项、点打印无响应；最新串口捕获只有
   重复 `Get-Printer-Attributes`，未观察到对应 `Print-Job`。当前 Bonjour 浏览只发现一个
