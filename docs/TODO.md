@@ -9,21 +9,21 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [x] IJPD binary data protocol over TCP 9101 with Hello, ordering, CRC32 and LZ4.
 - [x] Buffered receive/print/display path with PSRAM page cache.
 - [x] Incremental ILI9341 preview rendering and RGB565 wire-byte correction.
-- [x] Generic `PrinterConfig` and opt-in service capability flags.
+- [x] Generic `PrinterConfig` and service capability flags.
 - [x] Runtime service capability reporting in `get_device_info`.
 - [x] Separate ESC/POS RAW TCP ingress foundation, default port 9102.
 - [x] RAW job exclusivity, cancellation, idle/total timeout handling and terminal events.
 - [x] Host test suite: 40/40 passing.
 - [x] Standard-library AirPrint query/evidence capture tool and real-device runbook.
-- [x] Flash AirPrint service to ESP32-S3 and capture one real `Get-Printer-Attributes` response.
-- [x] Pass CUPS `ipptool -tv` Get-Printer-Attributes interoperability check on the probe.
+- [x] Flash AirPrint-enabled firmware to ESP32-S3 and capture one real `Get-Printer-Attributes` response.
+- [x] Pass CUPS `ipptool -tv` Get-Printer-Attributes interoperability check.
 - [x] ESP-IDF firmware build passing.
 - [x] MQTT control adapter foundation with bounded command reassembly.
 - [x] MQTT `IJCH` chunk envelope validation and host coverage.
 - [x] Third-party protocol documentation consolidated under `docs/protocols/`.
-- [x] AirPrint Core IPP codec, request validation, HTTP parser, opt-in ESP-IDF transport and capability response foundation.
-- [x] AirPrint Bonjour TXT/UUID builder and opt-in ESP-IDF mDNS service wrapper.
-- [x] Opt-in AirPrint query/Print-Job service and image/urf path to the logical Ricoh Mock; default firmware remains disabled.
+- [x] AirPrint Core IPP codec, request validation, HTTP parser, ESP-IDF transport and capability response foundation.
+- [x] AirPrint Bonjour TXT/UUID builder and ESP-IDF mDNS service wrapper.
+- [x] Default AirPrint query/Print-Job service and image/urf path to the logical Ricoh Mock; `AIRPRINT_ENABLE=OFF` builds IJPD-only firmware.
 - [x] IPP operation dispatcher and standard error response builder foundation.
 - [x] Single-active IPP Job lifecycle model and Job query/cancel dispatch foundation.
 - [x] Streaming Print-Job ingestion and backend sink boundary without document decoding.
@@ -44,7 +44,7 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [x] Capture and hash two repeated real `image/urf` Print-Job document bodies before designing the decoder.
 - [x] Independently analyze the captured URF public framing, page descriptor, stride, color and pixel CRC.
 - [x] Implement and golden-test the verified public Apple Raster Mono8/SW PackBits decoder subset.
-- [x] Verify the opt-in Print-Job stream -> Apple Raster decoder -> RasterSink vertical slice on both real golden documents.
+- [x] Verify the Print-Job stream -> Apple Raster decoder -> RasterSink vertical slice on both real golden documents.
 - [x] Freeze and host-test the synchronous RasterSink row lifetime, callback ordering, multi-page accounting, and decoder-error propagation contract.
 - [x] Add deterministic host Apple Raster decoder fuzz smoke coverage for valid, truncated, mutated, and incrementally chunked input.
 - [x] Add an independent decoded-output byte budget so compressed input limits cannot hide expansion limits.
@@ -52,7 +52,12 @@ checkboxes and the next-stage section whenever a stage is completed.
 - [ ] Confirm reserved fields and backend pixel contract before implementing the ESP32 decoder.
 - [x] Add bounded chunked HTTP request support for probe-side system-print capture without buffering the document.
 - [x] Preserve complete captured Print-Job bodies and IPP requests as golden evidence bundles.
-- [x] Run an opt-in ESP32 AirPrint Print-Job against a real Apple Raster golden and the Ricoh logical Mock HAL.
+- [x] Run an ESP32 AirPrint Print-Job against a real Apple Raster golden and the Ricoh logical Mock HAL.
+- [x] Preserve the iPhone-verified AirPrint `RS600`/600 DPI profile.
+- [x] Replace LCD nearest-neighbor pre-shrink with full-row area-average preview input; golden tests and iPhone 12 visual confirmation pass.
+- [x] Batch-copy Apple Raster literal spans in the decoder; host decoder/Print-Job and URF golden tests pass.
+- [ ] Measure AirPrint receive, URF decode and LCD refresh durations independently before changing performance-sensitive paths.
+- [ ] Reproduce iPhone 16 / iOS 26.5.2 delayed discovery and no-Print-Job behavior with a clean Bonjour cache and timestamped capture.
 
 ## MQTT Follow-up
 

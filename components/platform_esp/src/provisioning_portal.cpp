@@ -188,8 +188,10 @@ char g_scan_cache[3072] = "[]";  // 缓存的扫描结果 JSON
 volatile bool g_scan_ready = false;
 
 void do_background_scan() noexcept {
-    // 等待 Wi-Fi 射频稳定
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    // Both cold-start and on-demand provisioning restart the Wi-Fi driver
+    // immediately before this scan. Allow STA mode and the RF subsystem to
+    // settle before requesting a blocking scan.
+    vTaskDelay(pdMS_TO_TICKS(1500));
 
     for (int attempt = 0; attempt < 3; ++attempt) {
         esp_wifi_scan_stop();
@@ -219,7 +221,7 @@ void do_background_scan() noexcept {
         size_t jl = 1;
         g_scan_cache[0] = '[';
         for (int i = 0; i < real; ++i) {
-            if (aps[i].ssid[0] == ' ') continue;
+            if (aps[i].ssid[0] == 0) continue;
             const char* ssid = reinterpret_cast<char*>(aps[i].ssid);
             if (strstr(ssid, "IJPD-Setup") != nullptr) continue;
 
@@ -229,15 +231,25 @@ void do_background_scan() noexcept {
                 if (ssid[j] == '"' || ssid[j] == '\\') esc[el++] = '\\';
                 esc[el++] = ssid[j];
             }
-            jl += snprintf(g_scan_cache + jl, sizeof(g_scan_cache) - jl,
-                           "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%d}",
-                           (jl > 1) ? "," : "", esc, aps[i].rssi,
-                           static_cast<int>(aps[i].authmode != WIFI_AUTH_OPEN));
+            const int written = snprintf(g_scan_cache + jl, sizeof(g_scan_cache) - jl,
+                                         "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%d}",
+                                         (jl > 1) ? "," : "", esc, aps[i].rssi,
+                                         static_cast<int>(aps[i].authmode != WIFI_AUTH_OPEN));
+            if (written < 0 || static_cast<size_t>(written) >= sizeof(g_scan_cache) - jl) {
+                IJPD_LOGW(kTag, "scan cache full; returning partial network list");
+                break;
+            }
+            jl += static_cast<size_t>(written);
         }
-        g_scan_cache[jl] = ']';
-        g_scan_cache[jl + 1] = ' ';
+        if (jl + 2 <= sizeof(g_scan_cache)) {
+            g_scan_cache[jl++] = ']';
+            g_scan_cache[jl] = '\0';
+        } else {
+            strcpy(g_scan_cache, "[]");
+        }
         g_scan_ready = true;
-        IJPD_LOGI(kTag, "scan cached %u APs: %s", real, g_scan_cache);
+        IJPD_LOGI(kTag, "scan cached %u AP records (%u JSON bytes)",
+                  real, static_cast<unsigned>(jl));
         return;
     }
     // 三次失败：返回空
@@ -309,13 +321,22 @@ Err ProvisioningPortal::start() noexcept {
     char ap_name[24];
     snprintf(ap_name, sizeof(ap_name), "IJPD-Setup-%02X%02X", mac[4], mac[5]);
 
-    // 彻底停止 Wi-Fi（清除所有 STA 状态/重试），纯 AP 模式重启。
-    // 注意:不能改用 APSTA 以支持扫描 —— 实测 SoftAP 有客户端关联并传输时,
-    // WiFi 库 beacon 定时器崩溃(ieee80211_hostap_send_beacon_process
-    // LoadProhibited)。配网用手动输入 SSID 即可。
+    // 扫描只在配网热点启动前执行：先短暂启动 STA-only 完成扫描并缓存，
+    // 随后彻底停止 STA，再进入纯 AP。手机连接热点后 /scan 只读缓存，
+    // 不会在 SoftAP 活动时调用 Wi-Fi driver scan API。
     esp_wifi_stop();
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_wifi_set_mode(WIFI_MODE_AP);  // 纯 AP，无 STA
+    esp_err_t scan_err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (scan_err == ESP_OK) scan_err = esp_wifi_start();
+    if (scan_err == ESP_OK) {
+        do_background_scan();
+    } else {
+        IJPD_LOGW(kTag, "pre-portal scan radio start failed: %s", esp_err_to_name(scan_err));
+        strcpy(g_scan_cache, "[]");
+        g_scan_ready = true;
+    }
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));  // 纯 AP，无 STA
 
     wifi_config_t ap_cfg = {};
     strncpy(reinterpret_cast<char*>(ap_cfg.ap.ssid), ap_name, sizeof(ap_cfg.ap.ssid) - 1);
@@ -357,12 +378,8 @@ Err ProvisioningPortal::start() noexcept {
         return Err::OUT_OF_MEMORY;
     }
 
-    // 后台扫描已禁用（会断开 AP 客户端；使用手动输入 SSID 替代）
-    // xTaskCreatePinnedToCore(
-    //     [](void*) { do_background_scan(); vTaskDelete(nullptr); },
-    //     "scan", 4096, nullptr, 3, nullptr, 0);
-
-    IJPD_LOGI(kTag, "portal started: AP=%s IP=192.168.4.1 port=%d", ap_name, kPortalPort);
+    IJPD_LOGI(kTag, "portal started: AP=%s IP=192.168.4.1 port=%d scan_ready=%d",
+              ap_name, kPortalPort, g_scan_ready ? 1 : 0);
     return Err::OK;
 }
 
@@ -439,57 +456,14 @@ void ProvisioningPortal::send_html_(int fd) noexcept {
 }
 
 void ProvisioningPortal::send_scan_json_(int fd) noexcept {
-    // 纯 AP 模式扫描返回 ESP_FAIL(不支持)。门户以手动输入 SSID 为主,
-    // 扫描失败时返回空列表,前端显示"未找到网络"并保留手动输入框。
-    wifi_scan_config_t scan_cfg = {};  // 全零 = 默认全信道主动扫描
-    esp_err_t sr = esp_wifi_scan_start(&scan_cfg, true);
-    if (sr != ESP_OK) {
-        IJPD_LOGW(kTag, "scan unsupported in AP mode (err=%d), use manual input", sr);
-        send_json_(fd, R"json([{"ssid":"(Scan unavailable, please enter manually)","rssi":-100,"auth":0}])json");
+    // The radio scan completed before the AP was started; serving the cached
+    // JSON leaves the connected provisioning client and beacon uninterrupted.
+    if (!g_scan_ready) {
+        send_json_(fd,
+            R"json([{"ssid":"(Wi-Fi scan is preparing; retry shortly)","rssi":-100,"auth":0}])json");
         return;
     }
-
-    uint16_t count = 0;
-    esp_wifi_scan_get_ap_num(&count);
-    if (count == 0) {
-        send_json_(fd, R"json([{"ssid":"0 APs found - try manual input","rssi":-100,"auth":0}])json");
-        return;
-    }
-
-    if (count > 30) count = 30;
-    IJPD_LOGI(kTag, "scan found %u APs", count);
-
-    // 构建 JSON
-    char json[4096] = "[";
-    size_t jl = 1;
-    if (count > 0) {
-        wifi_ap_record_t aps[30];
-        uint16_t real = count;
-        esp_wifi_scan_get_ap_records(&real, aps);
-        for (int i = 0; i < real; ++i) {
-            if (aps[i].ssid[0] == '\0') continue;
-            const char* ssid = reinterpret_cast<char*>(aps[i].ssid);
-            if (strstr(ssid, "IJPD-Setup") != nullptr) continue;
-            // 转义 JSON 特殊字符
-            char esc[65] = {0};
-            size_t el = 0;
-            for (size_t j = 0; j < strlen(ssid) && el < 63; ++j) {
-                if (ssid[j] == '"' || ssid[j] == '\\') {
-                    if (el < 62) { esc[el++] = '\\'; }
-                }
-                esc[el++] = ssid[j];
-            }
-            jl += snprintf(json + jl, sizeof(json) - jl,
-                           "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%d}",
-                           (jl > 1) ? "," : "", esc, aps[i].rssi,
-                           static_cast<int>(aps[i].authmode != WIFI_AUTH_OPEN));
-        }
-    }
-    json[jl] = ']';
-    json[jl + 1] = '\0';
-
-    IJPD_LOGI(kTag, "scan json: %s", json);
-    send_json_(fd, json);
+    send_json_(fd, g_scan_cache);
 }
 
 void ProvisioningPortal::handle_connect_(int fd, const char* body,

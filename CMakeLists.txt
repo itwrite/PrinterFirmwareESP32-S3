@@ -1,9 +1,9 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-# AirPrint is an opt-in build surface. The default IJPD image must not even
-# compile the new IPP core until its ESP-IDF transport is intentionally enabled.
-option(AIRPRINT_ENABLE "Include the opt-in AirPrint components" OFF)
+# AirPrint is enabled in the standard firmware image. Set
+# -DAIRPRINT_ENABLE=OFF to exclude the IPP core and ESP-IDF transport.
+option(AIRPRINT_ENABLE "Include the AirPrint IPP components" ON)
 if(NOT AIRPRINT_ENABLE)
     set(EXCLUDE_COMPONENTS "airprint_core;airprint_esp" CACHE STRING
         "ESP-IDF components excluded from the default build" FORCE)

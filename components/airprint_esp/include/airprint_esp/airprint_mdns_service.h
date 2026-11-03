@@ -1,5 +1,5 @@
 // ============================================================================
-// airprint_mdns_service.h - Opt-in ESP-IDF AirPrint DNS-SD registration.
+// airprint_mdns_service.h - ESP-IDF AirPrint DNS-SD registration.
 // ============================================================================
 #ifndef IJPD_AIRPRINT_ESP_MDNS_SERVICE_H
 #define IJPD_AIRPRINT_ESP_MDNS_SERVICE_H

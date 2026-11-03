@@ -38,6 +38,49 @@ size_t make_request(uint8_t* buffer, size_t capacity, bool filter) {
     return writer.length();
 }
 
+size_t make_iphone_capability_request(uint8_t* buffer, size_t capacity) {
+    IppWriter writer(buffer, capacity);
+    if (writer.begin_request({2, 0}, IppOperation::GetPrinterAttributes, 100) !=
+            IppError::Ok ||
+        writer.begin_group(IppGroupTag::OperationAttributes) != IppError::Ok ||
+        writer.add_cstr(IppValueTag::Charset, "attributes-charset", "utf-8") !=
+            IppError::Ok ||
+        writer.add_cstr(IppValueTag::NaturalLanguage,
+                        "attributes-natural-language", "en") != IppError::Ok ||
+        writer.add_cstr(IppValueTag::Uri, "printer-uri",
+                        "ipp://printer.local/ipp/print") != IppError::Ok ||
+        writer.add_cstr(IppValueTag::Keyword, "requested-attributes",
+                        "printer-state-reasons") != IppError::Ok ||
+        writer.add_continuation(
+            IppValueTag::Keyword,
+            reinterpret_cast<const uint8_t*>("media-source-supported"),
+            std::strlen("media-source-supported")) != IppError::Ok ||
+        writer.add_continuation(
+            IppValueTag::Keyword,
+            reinterpret_cast<const uint8_t*>("printer-input-tray"),
+            std::strlen("printer-input-tray")) != IppError::Ok ||
+        writer.add_continuation(
+            IppValueTag::Keyword,
+            reinterpret_cast<const uint8_t*>("printer-mandatory-job-attributes"),
+            std::strlen("printer-mandatory-job-attributes")) != IppError::Ok ||
+        writer.add_continuation(
+            IppValueTag::Keyword,
+            reinterpret_cast<const uint8_t*>("media-col-ready"),
+            std::strlen("media-col-ready")) != IppError::Ok ||
+        writer.add_continuation(
+            IppValueTag::Keyword,
+            reinterpret_cast<const uint8_t*>("media-col-database"),
+            std::strlen("media-col-database")) != IppError::Ok ||
+        writer.add_continuation(
+            IppValueTag::Keyword,
+            reinterpret_cast<const uint8_t*>("media-col-supported"),
+            std::strlen("media-col-supported")) != IppError::Ok ||
+        writer.end_attributes() != IppError::Ok) {
+        return 0;
+    }
+    return writer.length();
+}
+
 AirPrintCapabilities capabilities() {
     AirPrintCapabilities value;
     value.enabled = true;
@@ -159,6 +202,62 @@ int main() {
     CHECK_TRUE(found_printer_state);
     CHECK_TRUE(!found_color);
     CHECK_TRUE(std::memcmp(response_bytes, "\x02\x00", 2) == 0);
+
+    uint8_t iphone_request_bytes[512] = {};
+    const size_t iphone_request_length = make_iphone_capability_request(
+        iphone_request_bytes, sizeof(iphone_request_bytes));
+    CHECK_TRUE(iphone_request_length != 0);
+    IppRequest iphone_request{};
+    CHECK_TRUE(parse_ipp_request(iphone_request_bytes, iphone_request_length, policy,
+                                 &iphone_request) == IppRequestError::Ok);
+    response_length = 0;
+    CHECK_TRUE(build_get_printer_attributes_response(
+                   iphone_request, caps, response_bytes, sizeof(response_bytes),
+                   &response_length) == AirPrintResponseError::Ok);
+    IppReader iphone_reader;
+    CHECK_TRUE(iphone_reader.begin(response_bytes, response_length) == IppError::Ok);
+    bool found_printer_reasons = false;
+    bool found_media_col_ready = false;
+    bool found_media_col_database = false;
+    bool found_media_col_supported = false;
+    bool found_unsupported_group = false;
+    IppGroupTag response_group = IppGroupTag::None;
+    for (;;) {
+        const IppReadResult item = iphone_reader.next();
+        if (item.error != IppError::Ok || item.kind == IppReadKind::EndOfAttributes) break;
+        if (item.kind == IppReadKind::GroupStart) {
+            response_group = item.group;
+            found_unsupported_group = found_unsupported_group ||
+                item.group == IppGroupTag::UnsupportedAttributes;
+            continue;
+        }
+        if (item.kind != IppReadKind::Attribute) continue;
+        if (attribute_name_equals(item.attribute, "printer-state-reasons")) {
+            found_printer_reasons = response_group == IppGroupTag::PrinterAttributes &&
+                                    item.attribute.value_tag == IppValueTag::Keyword &&
+                                    item.attribute.value_length == 4 &&
+                                    std::memcmp(item.attribute.value, "none", 4) == 0;
+        }
+        if (response_group == IppGroupTag::PrinterAttributes) {
+            found_media_col_ready = found_media_col_ready ||
+                (attribute_name_equals(item.attribute, "media-col-ready") &&
+                 item.attribute.value_tag == IppValueTag::BegCollection);
+            found_media_col_database = found_media_col_database ||
+                (attribute_name_equals(item.attribute, "media-col-database") &&
+                 item.attribute.value_tag == IppValueTag::BegCollection);
+            found_media_col_supported = found_media_col_supported ||
+                (attribute_name_equals(item.attribute, "media-col-supported") &&
+                 item.attribute.value_tag == IppValueTag::Keyword &&
+                 item.attribute.value_length == std::strlen("media-keyword") &&
+                 std::memcmp(item.attribute.value, "media-keyword",
+                             item.attribute.value_length) == 0);
+        }
+    }
+    CHECK_TRUE(found_printer_reasons);
+    CHECK_TRUE(found_media_col_ready);
+    CHECK_TRUE(found_media_col_database);
+    CHECK_TRUE(found_media_col_supported);
+    CHECK_TRUE(!found_unsupported_group);
 
     AirPrintCapabilities invalid = caps;
     invalid.printer_uri = "http://printer.local/ipp/print";

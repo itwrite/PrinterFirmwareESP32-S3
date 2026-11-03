@@ -1,7 +1,7 @@
 # IJPD Third-Party Protocols
 
 本文档目录描述当前默认 ESP32-S3 固件实际实现的外部协议。文档以源码和默认
-`main/app_main.cpp` 配置为准；AirPrint 是独立的 opt-in 开发功能，不属于默认协议。
+`main/app_main.cpp` 配置为准；默认构建启用 IJPD 和 AirPrint。
 
 服务端口、广播入口、默认/AirPrint 变体和设备验证状态统一见
 [固件对外服务状态](../firmware_service_status.md)。
@@ -16,7 +16,7 @@
 | mDNS/DNS-SD | STA 连网后自动启用 | 发现 IJPD 控制端口 | `_ijpd._tcp` |
 | ESC/POS RAW TCP | 当前关闭，可选 | 发送原始 ESC/POS 字节流 | 默认 TCP `9102` |
 | MQTT 控制/任务分片 | 当前关闭，可选 | 云端控制和承载 IJPD 数据流 | 用户配置 Broker URI/topic |
-| IPP/AirPrint | 默认关闭；需 `AIRPRINT_ENABLE=ON` 显式构建 | 显式构建可启用 query、受限 `image/urf` Print-Job 和 Job 查询，并按需使用 SoftAP 配网；IPP Raster 独立使用逻辑 CMYK8 Mock，不代表真实喷头电气驱动 | 默认无入口 |
+| IPP/AirPrint | 默认启用；`AIRPRINT_ENABLE=OFF` 可关闭 | query、受限 `image/urf` Print-Job 和 Job 查询；IPP Raster 独立使用逻辑 CMYK8 Mock，不代表真实喷头电气驱动 | TCP `631`、单个 canonical `_ipp._tcp` mDNS |
 
 USB Serial/JTAG 当前仅用于固件日志控制台，不提供第三方打印协议。
 
@@ -56,8 +56,11 @@ Firmware    0.3.0
 - 大图像必须先 `start_print`，再按响应中的 token 和派生包长发送数据。
 - 控制连接不要在收到 `start_print` 响应后立即关闭；进度和终态事件通过控制通道广播。
 - 所有多字节二进制字段均为 little-endian。
-- 当前 IJPD 默认镜像运行 RICOH MH5440 logical CMYK1 四遍 Mock；IPP Raster opt-in 路径仍用 CMYK8 Mock。`get_device_info` 中的能力和硬件状态
+- 当前 IJPD 默认镜像运行 RICOH MH5440 logical CMYK1 四遍 Mock；AirPrint Raster 路径使用独立的 CMYK8 Mock。`get_device_info` 中的能力和硬件状态
   不能当作真实喷头电气规格。
-- 默认固件不支持 IPP/AirPrint、PDF 或通过 HTTP 发送打印任务。显式 AirPrint 构建
-  可接收已验证的 `image/urf` Print-Job 并送入逻辑 Mock；不支持 PDF，也不能宣称
+- 固件不支持 PDF 或通过 HTTP 发送打印任务。默认 AirPrint 服务可接收受限的
+  `image/urf` Print-Job 并送入逻辑 Mock；不支持 PDF，也不能宣称
   已完成真实喷头打印。
+- 2026-11-03 设备复测：iPhone 12 / iOS 18.4.1 已完成照片 Job；iPhone 16 /
+  iOS 26.5.2 仍观察到列表加载慢和未确认 Print-Job。LCD 预览条纹修复已刷入并由用户确认；
+  AirPrint 端到端耗时尚未拆分测量。

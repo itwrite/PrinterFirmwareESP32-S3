@@ -218,9 +218,83 @@ bool run_stream(const std::vector<uint8_t>& body, SinkState* sink_state,
     return true;
 }
 
+void test_mock_row_conversion_resamples_widths() {
+    const uint8_t cmyk_source[] = {
+        10, 20, 30, 40, 50, 60, 70, 80,
+        90, 100, 110, 120, 130, 140, 150, 160,
+    };
+    RasterPageDescriptor page{};
+    page.width_px = 4;
+    page.height_px = 1;
+    page.bytes_per_row = sizeof(cmyk_source);
+    page.pixel_format = RasterPixelFormat::CMYK8888;
+    uint8_t cmyk_row[8] = {};
+    uint8_t black_row[2] = {};
+    CHECK_TRUE(convert_apple_raster_row_to_mock(
+                   page, cmyk_source, sizeof(cmyk_source), 2,
+                   cmyk_row, sizeof(cmyk_row), 2,
+                   black_row, sizeof(black_row)) ==
+               RasterDecoderError::Ok);
+    const uint8_t expected_cmyk[] = {10, 20, 30, 40, 90, 100, 110, 120};
+    CHECK_TRUE(std::memcmp(cmyk_row, expected_cmyk, sizeof(expected_cmyk)) == 0);
+    CHECK_TRUE(black_row[0] != black_row[1]);
+
+    // Expanding a narrow page must safely duplicate source pixels into the
+    // bounded Mock-width destination instead of indexing by source width.
+    const uint8_t mono_source[] = {0, 128};
+    page.width_px = 2;
+    page.bytes_per_row = sizeof(mono_source);
+    page.pixel_format = RasterPixelFormat::Mono8;
+    uint8_t expanded_cmyk[4 * 4] = {};
+    uint8_t expanded_black[4] = {};
+    CHECK_TRUE(convert_apple_raster_row_to_mock(
+                   page, mono_source, sizeof(mono_source), 2,
+                   expanded_cmyk, sizeof(expanded_cmyk), 4,
+                   expanded_black, sizeof(expanded_black)) == RasterDecoderError::Ok);
+    const uint8_t expected_black[] = {255, 255, 127, 127};
+    CHECK_TRUE(std::memcmp(expanded_black, expected_black, sizeof(expected_black)) == 0);
+    CHECK_EQ(expanded_cmyk[0], 0u);
+    CHECK_EQ(expanded_cmyk[1], 0u);
+    CHECK_EQ(expanded_cmyk[2], 0u);
+    CHECK_EQ(expanded_cmyk[3], 255u);
+    CHECK_EQ(expanded_cmyk[4], 0u);
+    CHECK_EQ(expanded_cmyk[5], 0u);
+    CHECK_EQ(expanded_cmyk[6], 0u);
+    CHECK_EQ(expanded_cmyk[7], 127u);
+
+    CHECK_TRUE(convert_apple_raster_row_to_mock(
+                   page, mono_source, sizeof(mono_source), 2,
+                   expanded_cmyk, 3, 4, expanded_black, sizeof(expanded_black)) ==
+                RasterDecoderError::InvalidStride);
+
+    // The LCD scaler should receive the complete source row so it can average
+    // each multi-pixel LCD footprint instead of previewing a nearest-neighbor
+    // row that has already discarded high-frequency detail.
+    const uint8_t detailed_mono[] = {0, 0, 255, 255};
+    page.width_px = 4;
+    page.bytes_per_row = sizeof(detailed_mono);
+    page.pixel_format = RasterPixelFormat::Mono8;
+    uint8_t native_cmyk[sizeof(detailed_mono) * 4] = {};
+    uint8_t mock_black[4] = {};
+    CHECK_TRUE(convert_apple_raster_row_to_mock(
+                   page, detailed_mono, sizeof(detailed_mono), page.width_px,
+                   native_cmyk, sizeof(native_cmyk), 4,
+                   mock_black, sizeof(mock_black)) == RasterDecoderError::Ok);
+    const uint8_t expected_native_black[] = {255, 255, 0, 0};
+    for (size_t pixel = 0; pixel < sizeof(expected_native_black); ++pixel) {
+        CHECK_EQ(native_cmyk[pixel * 4 + 0], 0u);
+        CHECK_EQ(native_cmyk[pixel * 4 + 1], 0u);
+        CHECK_EQ(native_cmyk[pixel * 4 + 2], 0u);
+        CHECK_EQ(native_cmyk[pixel * 4 + 3], expected_native_black[pixel]);
+    }
+    CHECK_TRUE(std::memcmp(mock_black, expected_native_black,
+                           sizeof(expected_native_black)) == 0);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    test_mock_row_conversion_resamples_widths();
     CHECK_TRUE(argc == 1 || argc >= 3);
     if (argc >= 3) {
         for (int i = 1; i < 3; ++i) {

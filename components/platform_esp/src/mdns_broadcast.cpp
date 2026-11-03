@@ -17,12 +17,16 @@ bool s_ijpd_started = false;
 Err ensure_mdns_(const char* hostname, const char* device_id) noexcept {
     if (s_initialized) return Err::OK;
     if (hostname == nullptr || device_id == nullptr) return Err::INVALID_ARGUMENT;
-    if (mdns_init() != ESP_OK) {
+    const esp_err_t init = mdns_init();
+    if (init != ESP_OK && init != ESP_ERR_INVALID_STATE) {
         IJPD_LOGE(kTag, "mdns_init failed");
         return Err::INTERNAL_ERROR;
     }
-    mdns_hostname_set(hostname);
-    mdns_instance_name_set(device_id);
+    if (mdns_hostname_set(hostname) != ESP_OK ||
+        mdns_instance_name_set(device_id) != ESP_OK) {
+        IJPD_LOGE(kTag, "mdns hostname/instance setup failed");
+        return Err::INTERNAL_ERROR;
+    }
     s_initialized = true;
     return Err::OK;
 }

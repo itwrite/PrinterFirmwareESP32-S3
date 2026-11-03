@@ -291,6 +291,34 @@ RasterDecoderError AppleRasterDecoder::feed(const uint8_t* data, size_t length,
         if (document_bytes_ >= limits_.max_document_bytes) {
             return fail_(RasterDecoderError::DataTooLarge);
         }
+        if (state_ == State::LiteralData) {
+            size_t copy_length = length - *consumed;
+            if (copy_length > literal_remaining_) {
+                copy_length = literal_remaining_;
+            }
+            const uint64_t document_remaining =
+                limits_.max_document_bytes - document_bytes_;
+            if (static_cast<uint64_t>(copy_length) > document_remaining) {
+                copy_length = static_cast<size_t>(document_remaining);
+            }
+            if (copy_length == 0) return fail_(RasterDecoderError::DataTooLarge);
+
+            std::memcpy(row_ + row_length_, data + *consumed, copy_length);
+            row_length_ += copy_length;
+            literal_remaining_ -= static_cast<uint32_t>(copy_length);
+            document_bytes_ += copy_length;
+            *consumed += copy_length;
+
+            if (literal_remaining_ == 0) {
+                if (row_length_ == page_.bytes_per_row) {
+                    const RasterDecoderError error = emit_row_group_();
+                    if (error != RasterDecoderError::Ok) return fail_(error);
+                } else {
+                    state_ = State::RowCommand;
+                }
+            }
+            continue;
+        }
         const RasterDecoderError error = consume_byte_(data[*consumed]);
         ++*consumed;
         ++document_bytes_;

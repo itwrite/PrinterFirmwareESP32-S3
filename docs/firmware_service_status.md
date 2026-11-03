@@ -6,15 +6,15 @@
 
 | 固件变体 | 构建方式 | 当前用途 |
 |---|---|---|
-| 默认固件 | `tools/idf.sh -B build build` | IJPD TCP、BLE 和常规 Wi-Fi 固件 |
-| AirPrint probe | `tools/idf.sh -B build-airprint-probe build -DAIRPRINT_ENABLE=ON` | AirPrint/iOS 联调，支持按需 SoftAP 配网 |
+| 默认固件 | `tools/idf.sh -B build build` | IJPD TCP、BLE、Wi-Fi 和 AirPrint 固件 |
+| IJPD-only 精简固件 | `tools/idf.sh -B build-ijpd-only build -DAIRPRINT_ENABLE=OFF` | 不含 AirPrint 依赖的 IJPD 固件 |
 
 两个变体当前都使用 `RICOH-MH5440-MOCK` / `MockRicohMh5440Hal` 的 A4 logical 模型，
 不代表真实喷头和真实纸张输出。
 
 ## 服务状态
 
-| 服务 | 默认固件 | AirPrint probe | 对外入口 | 用途 |
+| 服务 | 默认固件 | IJPD-only 精简固件 | 对外入口 | 用途 |
 |---|---|---|---|---|
 | Wi-Fi STA | 已启用 | 已启用 | 局域网 IP | TCP、mDNS、AirPrint 的网络承载 |
 | IJPD 控制 TCP | 已启用 | 已启用 | TCP `9100` | 设备查询、创建/取消任务、状态和事件 |
@@ -27,9 +27,9 @@
 | 主动切换配网 | `start_provisioning` | `start_provisioning` | IJPD 控制 TCP/BLE/MQTT | 已保存 Wi-Fi 时重新扫描后切换到 SoftAP；活动传输中拒绝 |
 | ESC/POS RAW TCP | 关闭 | 关闭 | 默认 TCP `9102` | 原始 ESC/POS 字节流；仅固件变体可选启用 |
 | MQTT 控制/任务分片 | 关闭 | 关闭 | 配置的 MQTT Broker | 云端控制和任务数据承载 |
-| IPP/AirPrint | 关闭 | 已启用 | TCP `631`，`/ipp/print` | AirPrint 查询、Print-Job 和 Job 查询 |
-| AirPrint mDNS/DNS-SD | 关闭 | 已启用 | `_ipp._tcp.local` | 发现 AirPrint 服务 |
-| AirPrint universal subtype | 关闭 | 已启用 | `_universal._sub._ipp._tcp` | AirPrint discovery subtype，指向同一 IPP 实例 |
+| IPP/AirPrint | 已启用 | 已关闭 | TCP `631`，`/ipp/print` | AirPrint 查询、Print-Job 和 Job 查询 |
+| AirPrint mDNS/DNS-SD | 已启用 | 已关闭 | `_ipp._tcp.local` | 发现 AirPrint 服务 |
+| AirPrint universal subtype | 不发布 | 不发布 | `_universal._sub._ipp._tcp` | 固件只发布 canonical `_ipp._tcp` 队列 |
 | USB Serial/JTAG | 调试接口 | 调试接口 | `/dev/cu.usbmodemXXX` | 日志、烧录和监视，不提供打印协议 |
 
 ## IJPD TCP
@@ -54,33 +54,33 @@
 
 ## AirPrint
 
-| 项目 | 默认固件 | AirPrint probe |
+| 项目 | 默认固件 | IJPD-only 精简固件 |
 |---|---|---|
-| TCP 端口 | 关闭 | `631` |
-| HTTP 路径 | 无 | `POST /ipp/print` |
-| `_ipp._tcp` mDNS | 关闭 | 已启用 |
-| `Get-Printer-Attributes` | 关闭 | 已启用 |
-| `Print-Job` | 关闭 | 已启用 |
-| `Validate-Job` | 关闭 | 已启用 |
-| `Get-Jobs` | 关闭 | 已启用 |
-| `Get-Job-Attributes` | 关闭 | 已启用 |
-| `Cancel-Job` | 关闭 | 已启用 |
-| 文档格式 | 无 | `image/urf`、`application/octet-stream` |
-| 后端 | 无 | RICOH CMYK8 logical Mock |
+| TCP 端口 | `631` | 关闭 |
+| HTTP 路径 | `POST /ipp/print` | 无 |
+| `_ipp._tcp` mDNS | 已启用 | 关闭 |
+| `Get-Printer-Attributes` | 已启用 | 关闭 |
+| `Print-Job` | 已启用 | 关闭 |
+| `Validate-Job` | 已启用 | 关闭 |
+| `Get-Jobs` | 已启用 | 关闭 |
+| `Get-Job-Attributes` | 已启用 | 关闭 |
+| `Cancel-Job` | 已启用 | 关闭 |
+| 文档格式 | `image/urf`、`application/octet-stream` | 无 |
+| 后端 | RICOH CMYK8 logical Mock | 无 |
 
 ## 端口和广播速查
 
-| 入口 | 默认固件 | AirPrint probe |
+| 入口 | 默认固件 | IJPD-only 精简固件 |
 |---|---:|---:|
 | TCP `80` SoftAP 配网 | 按需 | 按需 |
-| TCP `631` IPP/AirPrint | 关闭 | 已启用 |
+| TCP `631` IPP/AirPrint | 已启用 | 关闭 |
 | TCP `9100` IJPD 控制 | 已启用 | 已启用 |
 | TCP `9101` IJPD 数据 | 按任务 | 按任务 |
 | TCP `9102` ESC/POS RAW | 关闭 | 关闭 |
 | BLE GATT | 已启用 | 已启用 |
 | `_ijpd._tcp` mDNS | STA 后启用 | STA 后启用 |
-| `_ipp._tcp` mDNS | 关闭 | 已启用 |
-| `_universal._sub._ipp._tcp` | 关闭 | 已启用 |
+| `_ipp._tcp` mDNS | 已启用 | 关闭 |
+| `_universal._sub._ipp._tcp` | 不发布 | 不发布 |
 | MQTT | 关闭 | 关闭 |
 
 ## 最近设备状态
@@ -88,18 +88,21 @@
 | 项目 | 值 |
 |---|---|
 | 设备 | ESP32-S3 |
-| 固件变体 | AirPrint probe |
+| 固件变体 | 默认 AirPrint-enabled build |
 | 固件版本字段 | `0.3.0` |
 | MAC | `10:20:ba:71:d5:d0` |
-| 当前网络 | SoftAP |
-| SoftAP SSID | `IJPD-Setup-D5D1` |
-| SoftAP IP | `192.168.4.1` |
-| 配网 HTTP | `192.168.4.1:80` |
+| 已验证 Wi-Fi 网络 | `Xiaomi_D551` |
+| 已验证设备 IP | `192.168.31.100` |
+| STA 状态 | 已连接并通过 TCP 631 / IPP 查询验证 |
 | USB 串口 | `/dev/cu.usbmodem101` |
 | LCD | ILI9341 初始化通过 |
 | PSRAM | 初始化和内存测试通过 |
 | AirPrint Print-Job | HTTP `200` / IPP `successful-ok` |
-| 最近 Job | `completed`, `pages-completed=1` |
+| Golden URF Job | `completed`, `pages-completed=1` |
+| LCD 预览 | 2026-11-03 面积平均缩放修复后，用户确认条纹已修复 |
+| iPhone 12 / iOS 18.4.1 | 已确认“照片”Job 完成 |
+| iPhone 16 / iOS 26.5.2 | 列表慢且提交未确认；串口重复能力查询，未见对应 `Print-Job` |
+| AirPrint 速度阶段计时 | 未测；网络、解码和 LCD 刷新尚未拆分 |
 
 ## 相关文档
 

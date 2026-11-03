@@ -59,9 +59,10 @@
 
 通过 `core/printer_config.h` 的 `PrinterConfig` 选择打印机变体。Profile、设备型号
 和服务开关均可按硬件配置；未声明的服务默认关闭。当前默认镜像启用 IJPD TCP、BLE
-控制和 TCP 数据通道；ESC/POS RAW TCP、MQTT 为可选服务。AirPrint Core 和
-query/Print-Job service 仅在 `AIRPRINT_ENABLE=ON` 的显式构建中包含，默认镜像不
-监听 TCP 631 或发布 IPP mDNS。
+控制、TCP 数据通道及 AirPrint query/Print-Job 服务；ESC/POS RAW TCP 和 MQTT 为可选服务。
+AirPrint 在默认构建中启用，监听 TCP 631，并发布一个 canonical `_ipp._tcp` mDNS 队列；
+固件不发布 `_universal` subtype。
+如需构建不含 AirPrint 的 IJPD-only 镜像，显式设置 `-DAIRPRINT_ENABLE=OFF`。
 
 首次进入或通过 `start_provisioning` 再次进入配网时，固件会在 SoftAP 启动前临时
 切到 STA 模式扫描附近 Wi-Fi 并缓存结果，然后恢复纯 SoftAP。App 访问 `/scan` 时
@@ -90,8 +91,8 @@ ESP32-S3 真机联调中，约 4.1 MB 任务打印完成耗时约 17 秒。该�
 │   ├── printer_hal/          # IPrintheadHal / IStepperHal / ICutterHal + Ricoh/Mock HALs
 │   │                         # 注：任务书 hal/ 与 IDF 内置组件 hal 同名冲突，更名
 │   ├── app/                  # control_plane / device_info / print_service / printer_app
-│   ├── airprint_core/        # opt-in 平台无关 IPP/HTTP/Job Core 和样本契约
-│   └── airprint_esp/         # opt-in ESP-IDF HTTP/mDNS/query/Print-Job transport
+│   ├── airprint_core/        # 平台无关 IPP/HTTP/Job Core 和样本契约
+│   └── airprint_esp/         # ESP-IDF HTTP/mDNS/query/Print-Job transport
 ├── host_tests/               # 主机测试（自写断言 + ASan/UBSan/TSan + fuzz 固定种子）
 ├── tools/                    # make_packets.py / send_job.py（仅 Python 标准库）
 └── docs/                     # 协议 / 内存预算 / 决策 / 硬件问题 / 测试报告 / 依赖审计
@@ -121,17 +122,19 @@ ctest --test-dir host_tests/build_tsan -R "slot_pool|state_machine|stats|print_p
 source ~/esp/esp-idf/export.sh
 idf.py set-target esp32s3
 idf.py menuconfig                    # 基础 IDF 配置；首次联网使用 SoftAP 配网
+idf.py fullclean                     # 若 build/ 曾缓存 AIRPRINT_ENABLE=OFF，切换默认值时先清理
 idf.py build                         # 固件构建；现有平台组件仍有既有 warning
 idf.py -p <PORT> flash monitor       # 需真实设备
 ```
 
-显式构建 AirPrint query/Print-Job Mock 服务（支持按需 SoftAP 配网）：
+显式构建不含 AirPrint 的精简 IJPD-only 固件：
 
 ```bash
-tools/idf.sh -B build-airprint-probe build -DAIRPRINT_ENABLE=ON
+tools/idf.sh -B build-ijpd-only build -DAIRPRINT_ENABLE=OFF
 ```
 
-真机联调步骤见 [docs/airprint_probe_runbook.md](docs/airprint_probe_runbook.md)。
+默认固件的 AirPrint query/Print-Job 使用逻辑 Mock；真机联调步骤见
+[docs/airprint_probe_runbook.md](docs/airprint_probe_runbook.md)。
 
 ### 端到端联调（需设备在线）
 
@@ -176,9 +179,10 @@ BLE：搜索设备名 `IJPD-Printer`，UUID 和分片规则见
 | [docs/protocols/escpos-raw-tcp.md](docs/protocols/escpos-raw-tcp.md) | 可选 ESC/POS RAW TCP 字节流 |
 | [docs/protocols/mqtt.md](docs/protocols/mqtt.md) | 可选 MQTT 控制、事件和 IJCH 任务分片 |
 
-以上文档以当前源码为准。默认固件不提供 IPP/AirPrint；显式 AirPrint variant
-可把验证过的 `image/urf` 送入独立的逻辑 CMYK8 Mock 路径。默认 IJPD Profile 使用
-CMYK1 四平面 Mock。两者都尚未接入真实喷头电气驱动。
+以上文档以当前源码为准。默认固件提供 IPP/AirPrint，可把支持的 `image/urf`
+送入独立的逻辑 CMYK8 Mock 路径。默认 IJPD Profile 使用 CMYK1 四平面 Mock。
+AirPrint 和 IJPD 都尚未接入真实喷头电气驱动。使用 `AIRPRINT_ENABLE=OFF` 时，
+AirPrint HTTP/mDNS 服务及对应依赖不会包含在固件中。
 
 ### 工程设计和测试
 

@@ -1,5 +1,4 @@
 # airprint_core —— platform-independent IPP/AirPrint protocol primitives.
-# This component is intentionally not required by the default application yet.
 idf_component_register(
     SRCS "src/ipp_codec.cpp"
          "src/ipp_attributes.cpp"

@@ -1,9 +1,9 @@
 # AirPrint Query / Print-Job 真机联调
 
-本 runbook 验证显式构建的 AirPrint service。它支持
+本 runbook 验证默认构建中的 AirPrint service。它支持
 `Get-Printer-Attributes`、受限 `image/urf` `Print-Job`、`Get-Jobs`、
-`Get-Job-Attributes` 和 `Cancel-Job` 的 logical Mock 路径。默认固件仍关闭
-AirPrint；该路径不代表真实喷头点火、Ricoh 控制器时序或物理输出。
+`Get-Job-Attributes` 和 `Cancel-Job` 的 logical Mock 路径。该路径不代表真实
+喷头点火、Ricoh 控制器时序或物理输出。
 
 ## 1. 需要准备
 
@@ -15,17 +15,18 @@ AirPrint；该路径不代表真实喷头点火、Ricoh 控制器时序或物理
 
 ## 2. 构建和刷写
 
-先只构建，确认工具链和依赖正确：
+AirPrint 默认包含在普通构建中。使用独立构建目录避免复用旧的
+`AIRPRINT_ENABLE=OFF` CMake cache；也可以先对旧构建目录运行 `idf.py fullclean`：
 
 ```bash
-tools/idf.sh -B build-airprint-probe build -DAIRPRINT_ENABLE=ON
+tools/idf.sh -B build-airprint-default build
 ```
 
 确认串口后刷写并打开 monitor：
 
 ```bash
 ESPPORT=/dev/cu.usbmodemXXXX \
-tools/idf.sh -B build-airprint-probe flash monitor
+tools/idf.sh -B build-airprint-default flash monitor
 ```
 
 串口日志应看到：
@@ -34,11 +35,12 @@ tools/idf.sh -B build-airprint-probe flash monitor
 AirPrint service started on TCP 631 (print_jobs=enabled)
 ```
 
-显式镜像仍保留默认 IJPD TCP/BLE/Wi-Fi 行为；不要把该镜像当作生产固件。
+默认固件同时提供 IJPD TCP/BLE/Wi-Fi 与 AirPrint 服务；AirPrint 后端仍是逻辑 Mock。
+如需验证不含 AirPrint 的精简固件，可用 `-DAIRPRINT_ENABLE=OFF` 单独构建。
 
 ## 3. 配网
 
-`AIRPRINT_ENABLE=ON` 的 probe 变体支持与默认固件相同的按需 SoftAP 配网：没有有效的
+默认 AirPrint 固件支持与 IJPD 固件相同的按需 SoftAP 配网：没有有效的
 已保存 STA 凭据，或已保存凭据连接失败时，会创建 `IJPD-Setup-XXXX` 热点，并在
 `192.168.4.1:80` 提供配网 HTTP 门户。已有凭据且 STA 连接成功时不会启动 SoftAP；
 这是正常行为，不会同时运行 AP 和 STA。凭据不得写入源码、git、串口日志或 evidence。
@@ -77,12 +79,16 @@ ipptool -tv ipp://ijpd-71d5d0.local:631/ipp/print \
     get-printer-attributes.test
 ```
 
-当前 probe 已在 ESP32-S3 真机上通过该查询；返回的 capability response 包含
+当前默认固件已在 ESP32-S3 真机上通过该查询；返回的 capability response 包含
 `document-format-supported` 的 `mimeMediaType`、`urf-supported` 的多值 keyword、
 `media-col-default` collection 和 `printer-more-info` URI。
 
-显式 Print-Job variant 的 `operations-supported` 还包括 `Print-Job`、
+默认启用 Print-Job 时，`operations-supported` 还包括 `Print-Job`、
 `Validate-Job`、`Cancel-Job`、`Get-Job-Attributes` 和 `Get-Jobs`。
+
+当前默认 profile 使用已经过 iPhone 12 真机提交验证的 `RS600` / 600 DPI；修改 URF
+profile 时必须执行真实 iPhone Print-Job 回归，不能仅凭 golden decoder 测试推断 iOS
+客户端会继续提交任务。
 
 ## 5. Print-Job 和 Job 查询
 
@@ -115,25 +121,34 @@ IPP `client-error-not-found`。
 转换为 logical CMYK8 Mock 行。mDNS 只发布一个 `_ipp._tcp` 服务，不再主动发布
 `_universal._sub._ipp._tcp` subtype。
 
+LCD 预览把完整 Apple Raster 行转换后交给 `DisplayService` 进行面积平均缩放。2026-11-03
+已刷入修复，用户确认条纹消失；golden Print-Job 实机返回 HTTP `200`、IPP
+`successful-ok`、Job `completed`、1 页。
+
+速度诊断应分别记录 HTTP body 首末时间、解码开始/完成时间和预览行刷新耗时。现有串口
+只记录累计接收字节与任务完成，尚无这些阶段计时，因此不能确定慢在 Wi-Fi 传输、URF
+解码还是 LCD 刷新。优化时保留 `RS600` 声明和 iPhone 12 已验证提交行为。
+
 ## 6. 显示同步验证
 
 AirPrint 的每个 Apple Raster page 都在开始时建立一个 `DisplayService` 任务；解码器
-同步回调每得到一行 CMYK8 数据，就在对应的 `submitRaster` HAL 调用边界更新一次预览。
-因此显示路径不会等待完整 HTTP body 才开始刷新。页面完成、取消、HTTP 中断、HAL 行提交
-失败和 `waitUntilIdle` 失败都会结束显示任务；显示初始化不可用时，打印路径继续以 Mock
-HAL 降级运行，不会因为 LCD 不可用而拒绝 Print-Job。多页文档按页建立和结束显示任务。
+同步回调把完整可用宽度的 CMYK8 行交给显示服务，由显示服务按 LCD 像素覆盖区域做面积平均
+降采样，避免先最近邻压缩引入条纹。打印 Mock 的 2480 像素灰度行独立生成和提交；显示
+预览路径不改变已验证的 AirPrint `RS600` 能力声明或 Job 数据。页面完成、取消、HTTP 中断、
+HAL 行提交失败和 `waitUntilIdle` 失败都会结束显示任务；显示初始化不可用时，打印路径继续
+以 Mock HAL 降级运行，不会因为 LCD 不可用而拒绝 Print-Job。多页文档按页建立和结束显示任务。
 
-主机侧可先验证 decoder/Print-Job 回归和两个固件变体：
+主机侧可先验证 decoder/Print-Job 回归，以及默认 AirPrint 和 IJPD-only 两种固件变体：
 
 ```bash
 cmake --build host_tests/build
 ctest --test-dir host_tests/build --output-on-failure
-tools/idf.sh -B build build
-tools/idf.sh -B build-airprint-probe build -DAIRPRINT_ENABLE=ON
+tools/idf.sh -B build-airprint-default build
+tools/idf.sh -B build-ijpd-only build -DAIRPRINT_ENABLE=OFF
 git diff --check
 ```
 
-真机验证仍需刷写最新 `build-airprint-probe` 镜像，然后发送 golden `Print-Job` 或从
+真机验证应刷写最新默认 `build-airprint-default` 镜像，然后发送 golden `Print-Job` 或从
 iPhone 选择照片。观察 LCD 是否按 CMYK 通道逐行刷新，同时确认 Job 仍为 `completed`、
 串口没有 reset/panic；该验证只能证明当前 Mock/显示路径，不能证明真实 Ricoh 喷头输出。
 
@@ -157,14 +172,14 @@ macOS/iOS 触发查询后停止 `tcpdump`。当前 service 会返回 capability 
 受限 `image/urf` `Print-Job`，并在提交完成后保留最近 Job，供客户端继续轮询。
 当前已支持受限 `Transfer-Encoding: chunked`，可再次触发 macOS/iOS 系统打印来
 捕获完整 document body。服务把验证过的 Mono8/SW/RGB/CMYK Apple Raster 行转换成
-logical CMYK8 Mock 行，不把文档送入真实喷头。`_universal` subtype 与 canonical
-`_ipp._tcp` 是同一 service instance，不应作为两个打印机实现。
+logical CMYK8 Mock 行，不把文档送入真实喷头。固件只发布 canonical `_ipp._tcp` 队列；
+当前没有配置 `_universal._sub._ipp._tcp` subtype。Bonjour 客户端缓存仍可能短暂保留旧记录。
 
 ## 8. 当前不要做的事
 
 - 不要根据 pcap 文件名、网上结构体或单个字节模式推断 URF/Apple Raster layout。
 - 不要把未人工确认的页面尺寸、DPI、stride、颜色或像素 CRC 写入 manifest。
-- 不要刷写默认构建目录 `build-default` 作为 AirPrint probe。
+- 默认构建已启用 AirPrint；`AIRPRINT_ENABLE=OFF` 的 `build-ijpd-only` 不包含 AirPrint 服务。
 - 不要把 logical Mock 的完成状态描述成真实喷头已经打印。
 
 ## 9. 交给下一阶段的 evidence
@@ -174,7 +189,7 @@ logical CMYK8 Mock 行，不把文档送入真实喷头。`_universal` subtype �
 - `evidence/query-001/` 完整目录。
 - `airprint-query.pcap`。
 - `dns-sd` browse/resolve 输出。
-- probe 固件串口日志，尤其是启动、Wi-Fi、TCP 631 和 mDNS 行。
+- 默认固件串口日志，尤其是启动、Wi-Fi、TCP 631 和 mDNS 行。
 - macOS/iOS 型号、系统版本、打印界面操作步骤和触发时间。
 
 当前已经有两组真实 `image/urf` body，已保存为

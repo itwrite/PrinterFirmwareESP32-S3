@@ -20,11 +20,12 @@ extern "C" void app_main(void) {
     static constexpr const char* kTag = "main";
     IJPD_LOGI(kTag, "IJPD printer firmware starting");
 
-    // Default image: A4 logical RICOH MH5440 CMYK8 Mock. Unlisted transports stay off.
+    // Default image: IJPD plus AirPrint, backed by logical Mock HALs.
+    // Unlisted transports stay off.
     static ijpd::RicohMh5440MockConfig mock_config{};
 #if defined(IJPD_AIRPRINT_ENABLED)
-    // AirPrint is a logical Mock path; do not make the client wait for the
-    // default physical-row simulation delay before receiving the IPP response.
+    // AirPrint currently prints to a logical Mock path; do not make the client
+    // wait for simulated physical-row timing before receiving the IPP response.
     mock_config.row_period_us = 0;
 #endif
     static ijpd::MockRicohMh5440Hal ricoh_mh5440_mock(mock_config, mock_delay, nullptr);
@@ -49,14 +50,16 @@ extern "C" void app_main(void) {
             .port = 631,
             .accept_print_jobs = true,
             .printer_name = "RICOH MH5440 Mock",
-            .make_and_model = "RICOH MH5440 logical CMYK8 Mock",
-            .printer_info = "logical Mock HAL; image/urf Print-Job enabled",
+            .make_and_model = "RICOH MH5440 Mock",
+            .printer_info = "RICOH MH5440 Mock; image/urf Print-Job enabled",
             .printer_location = "Lab",
             .media_keyword = "iso_a4_210x297mm",
             .document_format = "image/urf",
-            .urf_supported = "V1.4,CP1,RS300,W8,SRGB24,DM1,IS1,MT1,FN3",
-            .dpi_x = 300,
-            .dpi_y = 300,
+            // Preserve the AirPrint profile confirmed by the iPhone photo
+            // submission run; Mock raster row width is independent of URF DPI.
+            .urf_supported = "V1.4,CP1,RS600,W8,DM1,IS1,MT1,FN3",
+            .dpi_x = 600,
+            .dpi_y = 600,
             .color_supported = true,
             .duplex_supported = false,
         },

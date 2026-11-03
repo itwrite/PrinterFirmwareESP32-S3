@@ -1,7 +1,6 @@
 # 文档入口
 
-只维护以下几类文档。第三方对接、固件开发和硬件接入分别从对应入口进入，
-不要在整个 `docs/` 目录中搜索旧协议稿或把 opt-in AirPrint 草稿当作默认协议。
+只维护以下几类文档。第三方对接、固件开发和硬件接入分别从对应入口进入。
 
 ## 先看哪份
 
@@ -31,9 +30,13 @@
 - `escpos-raw-tcp.md`：可选 RAW ESC/POS 字节流。
 - `mqtt.md`：可选 MQTT 控制、事件和 IJCH 任务分片。
 
-默认固件不提供 IPP/AirPrint。AirPrint Core、host Apple Raster decoder 子集和
-opt-in ESP-IDF transport 只在显式构建中编译；显式 variant 已接入 logical Mock，
-不代表真实喷头打印。
+默认固件启用 IPP/AirPrint。AirPrint 支持受限的 `image/urf` query/Print-Job 路径，
+并送入 logical Mock；这不代表真实喷头打印。需要精简 IJPD-only 镜像时，可用
+`-DAIRPRINT_ENABLE=OFF` 构建。
+
+最近设备验证：iPhone 12 / iOS 18.4.1 已完成照片 Job；iPhone 16 / iOS 26.5.2
+的发现延迟与任务提交仍待复测。LCD 预览条纹修复已刷入并由用户确认。AirPrint 速度
+尚未拆分测量网络传输、URF 解码与 LCD 刷新耗时，详见 [测试报告](test_report.md)。
 
 ## 维护规则
 

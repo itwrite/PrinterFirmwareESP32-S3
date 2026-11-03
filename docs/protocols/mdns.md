@@ -32,22 +32,24 @@ fw=0.3.0
 不要假设数据端口会被 mDNS 单独广播。当前 mDNS 只发布控制端口；数据端口
 从 `start_print` 响应的 `data_port` 读取。
 
-## 4. AirPrint opt-in 记录
+## 4. AirPrint 记录
 
-显式 `AIRPRINT_ENABLE=ON` 构建会额外发布一个 `_ipp._tcp` AirPrint service，
-并在同一 service instance 上附加 `_universal._sub._ipp._tcp` subtype。subtype
-不是第二个 printer/service，目的是满足 iOS 16+ 的 AirPrint discovery。
+默认构建会额外发布一个 canonical `_ipp._tcp` AirPrint service，资源路径为
+`ipp/print`，端口为 TCP `631`。固件不发布 `_universal._sub._ipp._tcp` subtype，
+避免同一实例被部分客户端显示为重复队列。若以 `AIRPRINT_ENABLE=OFF` 构建，
+则不会启动 AirPrint 服务或发布这些记录。
 
 ## 5. 非记录项
 
 当前不会发布：
 
-- 默认固件中的 `_ipp._tcp`
+- `AIRPRINT_ENABLE=OFF` 固件中的 `_ipp._tcp`
+- `_universal._sub._ipp._tcp` AirPrint subtype
 - AirPrint/IPP TXT
 - TCP `9101` 数据端口
 - RAW TCP 端口
 - MQTT Broker/topic
 - SoftAP 配网 HTTP 地址
 
-默认固件不实现 IPP/AirPrint。仓库中的 opt-in AirPrint mDNS wrapper 只在显式
-`AIRPRINT_ENABLE=ON` 构建中存在，当前不会由默认 app 启动。
+默认固件启用 IPP/AirPrint。`AIRPRINT_ENABLE=OFF` 的精简 IJPD-only 构建不包含
+AirPrint mDNS wrapper，也不会发布 IPP 服务记录。

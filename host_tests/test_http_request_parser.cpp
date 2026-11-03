@@ -5,6 +5,9 @@
 
 #include "airprint_core/http_request_parser.h"
 
+static_assert(ijpd::airprint::kHttpSocketBufferBytes == 8192,
+              "HTTP recv buffer and parser callback buffer must agree");
+
 using namespace ijpd::airprint;
 
 namespace {

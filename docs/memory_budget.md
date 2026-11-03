@@ -63,7 +63,7 @@
 | 任务 | 栈(字节) | 说明 |
 |---|---|---|
 | `ctrl_task` | 16384 | select/socket + JSON 解析 + 路由 + AirPrint/mDNS startup |
-| `air_start` | 65536 | opt-in AirPrint HTTP/mDNS startup path |
+| `air_start` | 16384 | bounded AirPrint HTTP/mDNS startup path; parser/socket storage is object-owned |
 | `rx_task` | 4096 | socket 读 + 帧状态机 + CRC（查表，无大局部数组） |
 | `decode_task` | 6144 | LZ4 解压（迭代非递归，局部变量小；余量保守） |
 | `print_task` | 4096 | 调度 + HAL 提交 |

@@ -1,18 +1,18 @@
 # 测试报告
 
-> 当前记录：2026-10-24 · 环境：macOS + ESP-IDF v5.4.1
+> 当前记录：2026-11-03 · 环境：macOS + ESP-IDF v5.4.1
 > 主机测试在 `-Wall -Wextra -Werror -fno-exceptions -fno-rtti` + ASan/UBSan 下编译执行；
 > 并发模块额外通过 ThreadSanitizer 15 连跑压测（0 告警 / 0 偶发）。
 
-当前验证结果：主机 `40/40` 通过；ESP-IDF 默认镜像构建通过；默认镜像已刷写
-到 ESP32-S3 并成功启动。构建仍有 `provisioning_portal.cpp` 的既有警告和
-volatile counter 警告，不能再表述为“零告警”。
+最近的 AirPrint/LCD 修改通过相关 host tests、两组真实 URF golden 和默认 ESP-IDF
+AirPrint 镜像构建，并已刷入 ESP32-S3。构建仍有 `provisioning_portal.cpp` 的既有警告和
+volatile counter 警告，不能表述为“零告警”。完整历史测试矩阵仍记录在下文。
 
 本轮全量测试中，Ricoh MH5440 logical Mock、HAL bundle 注入接口和 AirPrint 测试均稳定通过。
 
-`AIRPRINT_ENABLE=ON` 的显式 AirPrint Core + HTTP/query/Print-Job transport 构建也已
-通过，最新镜像为 `0x12fad0` bytes（约 `1.20 MiB`）；默认构建排除 `airprint_core` 和 `airprint_esp`，当前
-没有 TCP 631 listener 或 mDNS IPP 注册。
+AirPrint Core + HTTP/query/Print-Job transport 已纳入默认构建；另以
+`-DAIRPRINT_ENABLE=OFF` 验证 IJPD-only 精简构建可通过。默认配置启用 TCP 631 和
+IPP mDNS 注册。
 
 本轮已完成一次 ESP32-S3 真机 AirPrint query 联调：设备 MAC `10:20:ba:71:d5:d0`，
 连接 `Piao` 后获得 `172.20.10.3`，`_ijpd._tcp` 和 TCP `631` 均启动；原始
@@ -52,14 +52,14 @@ host bridge 现在按 decoder 完成页数填充 IPP `pages-completed`，并在 
 后保留原始 decoder 错误，同时将 Job 标记为 `aborted`。`document-format` 在 stream
 入口按 ASCII 不区分大小写匹配；裸 decoder 允许调用方处理 `consumed < length` 的
 尾部，而 Print-Job bridge 会拒绝 raster 文档后的 trailing bytes。该 adapter 只用于
-host/opt-in Core 验证，不会调用 ESP32 printer HAL。
+host/Core 验证，不会调用 ESP32 printer HAL。
 
 `MockRicohMh5440Hal` 已接入默认 `main/app_main.cpp` Profile 和 `PrinterHalBundle`；
 默认 ESP32 镜像运行 RICOH MH5440 logical CMYK1 four-pass Mock。该 Ricoh Mock 只验证 CMYK1
 逻辑行、通道统计/CRC、确定性故障和生命周期，不代表真实喷头电气驱动；真实喷头
 `printhead.is_configured` 仍保持 `false`，直到厂商电气资料和真实控制器完成闭合。
 
-显式 `AIRPRINT_ENABLE=ON` 镜像已在同一 ESP32-S3 上开启 AirPrint Print-Job，并通过
+默认 AirPrint 镜像已在同一 ESP32-S3 上提供 AirPrint Print-Job，并通过
 TCP `631` 接收第一组真实 golden `ipp_body.bin`（`707738` bytes）。HTTP 返回 `200`，
 IPP 返回 `successful-ok`，Job `1` 为 completed，`pages-completed=1`、
 `job-k-octets=692`。服务同时通过 `_ipp._tcp.local` 发布
@@ -67,8 +67,8 @@ IPP 返回 `successful-ok`，Job `1` 为 completed，`pages-completed=1`、
 当前是逻辑 Mono8 -> CMYK8 Mock conversion path，不代表真实喷头点火。
 
 本轮首次发送照片时暴露并修复了 ESP HTTP body 同 chunk metadata/document 的 consumed
-处理问题；修复后真实 Print-Job 已稳定返回。AirPrint opt-in runtime evidence 见
-`evidence/real-ricoh-mock-001/airprint-optin-runtime.md`。
+处理问题；修复后真实 Print-Job 已稳定返回。AirPrint runtime evidence 见
+`evidence/real-ricoh-mock-001/airprint-optin-runtime.md`（历史验证构建记录）。
 
 随后补齐了 iOS/PrintKit 可能使用的 Job selector 路径：`Get-Job-Attributes` 现在
 接受并校验完整 `job-uri` 或 `job-id`，而 parser 不再要求 Job 查询带
@@ -95,6 +95,21 @@ selector 互操作测试；使用真实 `.../job/<id>` URI 的原始 IPP 请求�
 `job-k-octets=2415`；对应 `Get-Job-Attributes` 返回 HTTP `200` / IPP
 `successful-ok`。当前固件是逻辑 `MockRicohMh5440Hal`，因此没有真实纸张输出是预期的。
 
+## 2026-11-03 最新 AirPrint / LCD 验证
+
+- 已恢复并保留此前 iPhone 真机打印成功的 AirPrint profile：`RS600`、600 DPI，
+  `image/urf` 与 `application/octet-stream`；未更改该 profile 以追求速度。
+- 已补充 `media-col-ready`、`media-col-database` 和 `media-col-supported` 的有效 A4 响应。
+- 已修复 LCD 条纹：完整 Apple Raster 行进入显示服务面积平均缩放，不再先以最近邻降采样。
+- Apple Raster literal 数据路径已改为分块拷贝；decoder、Print-Job 和两组 URF golden 测试通过，默认固件构建通过。主机 golden 基准优化后 7 次中位数为 0.126 秒；没有受控的优化前重复基准，不能据此量化性能提升。
+- ESP32-S3 golden URF 实机任务：HTTP `200`、IPP `successful-ok`、Job `completed`、1 页。
+- 用户确认 LCD 条纹已修复。
+- iPhone 12 / iOS 18.4.1 曾提交约 9.75 MB 的“照片”Job 并完成。
+- iPhone 16 / iOS 26.5.2 报告设备列表加载慢、曾出现两个同名项、点打印无响应；最新串口捕获只有
+  重复 `Get-Printer-Attributes`，未观察到对应 `Print-Job`。当前 Bonjour 浏览只发现一个
+  `_ipp._tcp` canonical 队列；第二个客户端条目可能是缓存，尚需手机侧清缓存/重新发现验证。
+- AirPrint 总时长尚未拆分测量网络接收、URF 解码、LCD 刷新各阶段，尚无证据判定速度瓶颈来源。
+
 本轮已完成默认 Ricoh Mock ESP32-S3 真机回归，完整摘要见
 `evidence/real-ricoh-mock-001/README.md`。设备 MAC 为
 `10:20:ba:71:d5:d0`，通过 `Xiaomi_D551` 获取 `192.168.31.100`。验证覆盖
@@ -106,15 +121,22 @@ selector 互操作测试；使用真实 `.../job/<id>` URI 的原始 IPP 请求�
 `2480×3508 px @300 DPI`、`9920 bytes/row` 和 `210 mm` A4 逻辑纸张；超过完整页缓存
 阈值时使用 preview-only 实时渲染。A4 模型不代表真实 MH5440 喷头覆盖范围。
 
-AirPrint 显示生命周期已补齐：Apple Raster 每页建立独立的显示任务，逐行预览更新与
-CMYK8 Mock HAL 的 `submitRaster` 行回调保持同一同步边界；完成、取消、HTTP 中断、HAL
-失败和等待 HAL 空闲失败均幂等结束显示任务，LCD 初始化不可用时打印继续降级运行。
-该补丁已通过本轮 `40/40` host tests、默认 ESP-IDF 构建和 `AIRPRINT_ENABLE=ON`
-构建；最新刷机后的 LCD 逐行刷新和无 reset/panic 仍待设备验证。
+AirPrint 显示生命周期已补齐：Apple Raster 每页建立独立的显示任务，完整源行交给
+DisplayService 面积平均缩放；CMYK8 Mock HAL 仍使用独立 2480 像素灰度行。完成、取消、
+HTTP 中断、HAL 失败和等待 HAL 空闲失败均幂等结束显示任务，LCD 初始化不可用时打印继续
+降级运行。2026-11-03 两组 golden host 测试和默认 AirPrint 固件构建通过，优化固件已刷入；
+设备 golden Job `1` 返回 HTTP `200`、IPP `successful-ok`、`completed`、1 页，用户确认
+LCD 条纹已修复。
+
+同日 iPhone 现场验证：iPhone 12 / iOS 18.4.1 已提交并完成“照片” Job（约 9.75 MB）；
+iPhone 16 / iOS 26.5.2 设备列表较慢、面板曾短暂退回预览并出现两个同名项，串口观察到
+高频 `Get-Printer-Attributes`，但相应窗口没有 `Print-Job`。当前 Bonjour 浏览只发现一个
+canonical `_ipp._tcp` 服务；另一个手机列表项可能来自缓存，尚未由客户端清缓存复测确认。
+AirPrint 端到端耗时尚未拆分为网络传输、URF 解码和 LCD 刷新阶段。
 
 BLE legacy advertising payload 的 `adv fields rc=4` 已修复：flags + 128-bit Service UUID
 保留在主广播包，完整 `IJPD-Printer` 名称移动到 scan response，避免超过 31-byte
-广播上限。默认固件和 AirPrint probe 均构建通过；最新 AirPrint probe 已刷入
+广播上限。默认 AirPrint 固件和 IJPD-only 精简构建均构建通过；最新 AirPrint 固件已刷入
 `/dev/cu.usbmodem101`，启动日志确认 `ble_ctl: advertising as IJPD-Printer`，且未再
 出现 `adv fields rc=4`。BLE 广播启动已验证，具体客户端扫描、连接和 GATT 控制回环仍待
 手机或 BLE 测试客户端验证。
@@ -191,7 +213,7 @@ BLE legacy advertising payload 的 `adv fields rc=4` 已修复：flags + 128-bit
 | P6 | 致命错误不回收 READY 槽位 | all_slots_free 断言 |
 | P6 | decode 提交携带新代次→残留项不被视为过期 | TSan 15 连跑定位 |
 | P6 | last_progress_ms_ 跨线程非原子 | TSan |
-| AirPrint probe | HTTP task 栈中放置 8 KiB parser + socket buffer 导致真实查询连接 reset | ESP32-S3 真机 query；将有界 parser/buffer 移出 task stack |
+| AirPrint HTTP 服务 | HTTP task 栈中放置 8 KiB parser + socket buffer 导致真实查询连接 reset | ESP32-S3 真机 query；将有界 parser/buffer 移出 task stack |
 
 ## 4. 已知限制（诚实声明）
 

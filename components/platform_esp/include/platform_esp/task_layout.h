@@ -33,7 +33,7 @@ inline constexpr UBaseType_t kPrioDisplay = 15;
 inline constexpr UBaseType_t kPrioReport = 3;
 
 inline constexpr uint32_t kStackCtrl = 16384;  // AirPrint/mDNS/control responses need margin
-inline constexpr uint32_t kStackAirPrint = 65536;
+inline constexpr uint32_t kStackAirPrint = 16384;  // initialization uses bounded parser temporaries
 inline constexpr uint32_t kStackRx = 4096;
 inline constexpr uint32_t kStackDecode = 6144;
 inline constexpr uint32_t kStackPrint = 4096;

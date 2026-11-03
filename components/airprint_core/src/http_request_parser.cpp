@@ -41,7 +41,12 @@ const char* http_parser_error_name(HttpParserError error) noexcept {
 }
 
 HttpRequestParser::HttpRequestParser(const HttpParserLimits& limits) noexcept
-    : limits_(limits) {
+    : limits_{} {
+    configure(limits);
+}
+
+void HttpRequestParser::configure(const HttpParserLimits& limits) noexcept {
+    limits_ = limits;
     if (limits_.max_header_bytes == 0 || limits_.max_header_bytes > kHttpMaxHeaderBytes) {
         limits_.max_header_bytes = kHttpMaxHeaderBytes;
     }
@@ -52,6 +57,7 @@ HttpRequestParser::HttpRequestParser(const HttpParserLimits& limits) noexcept
     if (limits_.max_headers == 0 || limits_.max_headers > kHttpMaxHeaders) {
         limits_.max_headers = kHttpMaxHeaders;
     }
+    reset();
 }
 
 void HttpRequestParser::reset() noexcept {

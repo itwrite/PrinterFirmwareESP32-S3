@@ -1,16 +1,19 @@
-// airprint_probe.cpp - Opt-in AirPrint query and Print-Job service.
+// airprint_probe.cpp - AirPrint query and Print-Job service.
 #include "airprint_esp/airprint_probe.h"
 
 #include "airprint_core/airprint_mdns.h"
+#include "airprint_core/ipp_attributes.h"
 #include "airprint_core/ipp_operations.h"
 
 #include <cstring>
 #include <new>
+#include <algorithm>
 
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "platform_esp/display_service.h"
+#include "platform_esp/log_adapter.h"
 
 namespace ijpd {
 namespace airprint {
@@ -18,9 +21,7 @@ namespace {
 constexpr const char* kTag = "airprint";
 constexpr uint32_t kMockWidthPx = 2480;
 constexpr uint32_t kMockHeightPx = 3508;
-constexpr uint32_t kMockRowBytes = kMockWidthPx * 4;
 constexpr uint32_t kMockWidthUm = 210000;
-constexpr uint32_t kMockDpi = 300;
 
 const char* abort_reason_name(HttpAbortReason reason) noexcept {
     switch (reason) {
@@ -44,10 +45,15 @@ struct AirPrintProbe::State {
     AppleRasterPrintBackend raster_backend;
     IppPrintJobLimits print_limits{};
     IppPrintJobStream print_job;
+    PrintheadConfig hal_config{};
     bool page_started = false;
     bool display_job_started = false;
     RasterPageDescriptor page{};
-    uint8_t cmyk_row[kMockRowBytes] = {};
+    uint8_t hal_gray_row[kMockWidthPx] = {};
+    // Keep source horizontal detail for DisplayService's area-average scaler.
+    // Apple Raster rows are bounded to 64 KiB; the display CMYK row fits the
+    // same bound even when a wide RGB source is reduced to 16K preview pixels.
+    uint8_t display_cmyk_row[kAppleRasterMaxRowBytes] = {};
     uint8_t response[kMaxIppProbeResponseBytes] = {};
     size_t response_length = 0;
 
@@ -69,7 +75,7 @@ Err AirPrintProbe::start(const char* hostname, const char* device_id,
                          const AirPrintCapabilities& capabilities,
                          IPrintheadHal* printhead,
                          bool accept_print_jobs) noexcept {
-    if (started_ || hostname == nullptr || device_id == nullptr) {
+    if (started_) {
         return Err::INVALID_ARGUMENT;
     }
     if (validate_airprint_capabilities(capabilities) != AirPrintResponseError::Ok) {
@@ -82,13 +88,25 @@ Err AirPrintProbe::start(const char* hostname, const char* device_id,
     capabilities_ = capabilities;
     if (state_ == nullptr) {
         state_ = static_cast<State*>(heap_caps_malloc(sizeof(State), MALLOC_CAP_SPIRAM));
-        if (state_ == nullptr) return Err::OUT_OF_MEMORY;
+        if (state_ == nullptr) {
+            ESP_LOGE(kTag, "state allocation failed: size=%u psram_free=%u internal_free=%u",
+                     static_cast<unsigned>(sizeof(State)),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+            return Err::OUT_OF_MEMORY;
+        }
         new (state_) State();
     }
     State& state = *state_;
-    if (build_airprint_mdns_record(capabilities_, device_id, hostname, &state.mdns_record) !=
-        AirPrintMdnsError::Ok) {
-        return Err::INVALID_ARGUMENT;
+    ESP_LOGI(kTag, "starting AirPrint: state=%u PSRAM free=%u internal free=%u",
+             static_cast<unsigned>(sizeof(State)),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+    if (hostname != nullptr && device_id != nullptr) {
+        if (build_airprint_mdns_record(capabilities_, device_id, hostname,
+                                       &state.mdns_record) != AirPrintMdnsError::Ok) {
+            return Err::INVALID_ARGUMENT;
+        }
     }
     state.sink = RasterSink{this, sink_begin_, sink_row_, sink_end_, sink_cancel_};
     state.raster_backend.configure({}, state.sink);
@@ -121,15 +139,33 @@ Err AirPrintProbe::start(const char* hostname, const char* device_id,
     http_limits.max_body_bytes = state_->print_limits.max_document_bytes +
                                  state_->print_limits.max_metadata_bytes;
     const Err http_error = http_.start(capabilities.ipp_port, host, http_limits);
-    if (http_error != Err::OK) return http_error;
-
-    const Err mdns_error = mdns_.start(hostname, device_id, state.mdns_record);
-    if (mdns_error != Err::OK) {
-        http_.stop();
-        return mdns_error;
+    if (http_error != Err::OK) {
+        ESP_LOGE(kTag, "HTTP listener start failed: %s internal_free=%u",
+                 err_name(http_error),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+        return http_error;
     }
+
     started_ = true;
     return Err::OK;
+}
+
+Err AirPrintProbe::start_mdns(const char* hostname, const char* device_id) noexcept {
+    if (!started_ || state_ == nullptr || hostname == nullptr || device_id == nullptr) {
+        return Err::INVALID_ARGUMENT;
+    }
+    if (mdns_.started()) return Err::OK;
+    if (build_airprint_mdns_record(capabilities_, device_id, hostname,
+                                   &state_->mdns_record) != AirPrintMdnsError::Ok) {
+        return Err::INVALID_ARGUMENT;
+    }
+    const Err result = mdns_.start(hostname, device_id, state_->mdns_record);
+    if (result != Err::OK) {
+        ESP_LOGE(kTag, "AirPrint mDNS registration failed: %s internal_free=%u",
+                 err_name(result),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+    }
+    return result;
 }
 
 void AirPrintProbe::stop() noexcept {
@@ -174,13 +210,27 @@ bool AirPrintProbe::handle_headers_(const HttpRequestHead& head) noexcept {
     }
     body_kind_ = BodyKind::Unknown;
     ipp_prefix_length_ = 0;
+    http_body_bytes_seen_ = 0;
+    http_body_log_threshold_ = 64u * 1024u;
     if (state_ != nullptr) state_->page_started = false;
     if (accept_print_jobs_ && state_ != nullptr) state_->print_job.reset();
     return true;
 }
 
 bool AirPrintProbe::handle_body_(const uint8_t* data, size_t length) noexcept {
-    if (body_kind_ == BodyKind::PrintJob) return feed_print_body_(data, length);
+    http_body_bytes_seen_ += length;
+    if (body_kind_ == BodyKind::PrintJob) {
+        const bool accepted = feed_print_body_(data, length);
+        if (accepted && state_ != nullptr &&
+            http_body_bytes_seen_ >= http_body_log_threshold_) {
+            ESP_LOGI(kTag, "Print-Job HTTP body received: bytes=%llu ipp_state=%u doc=%llu",
+                     static_cast<unsigned long long>(http_body_bytes_seen_),
+                     static_cast<unsigned>(state_->print_job.state()),
+                     static_cast<unsigned long long>(state_->print_job.document_bytes()));
+            http_body_log_threshold_ += 1024u * 1024u;
+        }
+        return accepted;
+    }
     if (body_kind_ == BodyKind::Query) return feed_query_body_(data, length);
 
     size_t offset = 0;
@@ -189,11 +239,14 @@ bool AirPrintProbe::handle_body_(const uint8_t* data, size_t length) noexcept {
     }
     if (ipp_prefix_length_ < sizeof(ipp_prefix_)) return true;
     const uint16_t operation = static_cast<uint16_t>(ipp_prefix_[2] << 8) | ipp_prefix_[3];
-    ESP_LOGI(kTag, "IPP operation=0x%04x", static_cast<unsigned>(operation));
     body_kind_ = operation == static_cast<uint16_t>(IppOperation::PrintJob) &&
                          accept_print_jobs_
                      ? BodyKind::PrintJob
                      : BodyKind::Query;
+    ESP_LOGI(kTag, "IPP operation=0x%04x route=%s print_jobs=%s",
+             static_cast<unsigned>(operation),
+             body_kind_ == BodyKind::PrintJob ? "Print-Job" : "query",
+             accept_print_jobs_ ? "enabled" : "disabled");
     if (body_kind_ == BodyKind::PrintJob) {
         if (!feed_print_body_(ipp_prefix_, sizeof(ipp_prefix_))) {
             ESP_LOGE(kTag, "Print-Job prefix rejected: stream=%u decoder=%s",
@@ -220,12 +273,23 @@ bool AirPrintProbe::handle_body_(const uint8_t* data, size_t length) noexcept {
                          ? raster_decoder_error_name(state_->raster_backend.decoder_error())
                          : "no_state");
         }
+        if (accepted && body_kind_ == BodyKind::PrintJob && state_ != nullptr &&
+            http_body_bytes_seen_ >= http_body_log_threshold_) {
+            ESP_LOGI(kTag, "Print-Job HTTP body received: bytes=%llu ipp_state=%u doc=%llu",
+                     static_cast<unsigned long long>(http_body_bytes_seen_),
+                     static_cast<unsigned>(state_->print_job.state()),
+                     static_cast<unsigned long long>(state_->print_job.document_bytes()));
+            http_body_log_threshold_ += 1024u * 1024u;
+        }
         return accepted;
     }
     return true;
 }
 
 HttpResponse AirPrintProbe::handle_complete_() noexcept {
+    ESP_LOGI(kTag, "HTTP request complete: route=%u body_bytes=%llu",
+             static_cast<unsigned>(body_kind_),
+             static_cast<unsigned long long>(http_body_bytes_seen_));
     if (body_kind_ == BodyKind::PrintJob) return print_response_();
     HttpResponse response;
     response.status_code = 200;
@@ -233,10 +297,13 @@ HttpResponse AirPrintProbe::handle_complete_() noexcept {
     response.content_type = "application/ipp";
     if (state_ == nullptr) return response;
     state_->response_length = 0;
-    if (state_->session.finish(state_->response, sizeof(state_->response),
-                               &state_->response_length,
-                               static_cast<uint64_t>(esp_timer_get_time() / 1000)) !=
-        IppProbeError::Ok) {
+    const IppProbeError finish_error = state_->session.finish(
+        state_->response, sizeof(state_->response), &state_->response_length,
+        static_cast<uint64_t>(esp_timer_get_time() / 1000));
+    if (finish_error != IppProbeError::Ok) {
+        ESP_LOGE(kTag, "IPP query response failed: error=%s request_bytes=%u",
+                 ipp_probe_error_name(finish_error),
+                 static_cast<unsigned>(state_->session.request_bytes()));
         static constexpr char kError[] = "ipp probe failed";
         response.status_code = 500;
         response.reason = "Internal Server Error";
@@ -244,6 +311,21 @@ HttpResponse AirPrintProbe::handle_complete_() noexcept {
         response.body = reinterpret_cast<const uint8_t*>(kError);
         response.body_length = sizeof(kError) - 1;
         return response;
+    }
+    const uint16_t response_status = static_cast<uint16_t>(
+        (static_cast<uint16_t>(state_->response[2]) << 8) | state_->response[3]);
+    ESP_LOGI(kTag, "IPP query response ready: bytes=%u request_id=%lu response_status=0x%04x",
+             static_cast<unsigned>(state_->response_length),
+             static_cast<unsigned long>(state_->session.request().header.request_id),
+             static_cast<unsigned>(response_status));
+    const IppRequest& request = state_->session.request();
+    for (size_t i = 0; i < request.attribute_count; ++i) {
+        const IppAttributeView& attribute = request.attributes[i];
+        if (attribute_name_equals(attribute, "requested-attributes")) {
+            ESP_LOGI(kTag, "IPP requested-attribute: %.*s",
+                     static_cast<int>(attribute.value_length),
+                     reinterpret_cast<const char*>(attribute.value));
+        }
     }
     response.body = state_->response;
     response.body_length = state_->response_length;
@@ -264,7 +346,7 @@ bool AirPrintProbe::feed_print_body_(const uint8_t* data, size_t length) noexcep
         if (result.error != IppPrintStreamError::Ok) {
             const IppRequest& request = state_->print_job.request();
             ESP_LOGE(kTag, "Print-Job stream error=%s consumed=%u state=%u doc=%llu "
-                     "ipp_error=%s ipp_status=0x%04x attrs=%u error_attr_len=%u decoder=%s",
+                     "ipp_error=%s ipp_status=0x%04x attrs=%u error_attr=%.*s decoder=%s",
                      ipp_print_stream_error_name(result.error),
                      static_cast<unsigned>(result.consumed),
                      static_cast<unsigned>(state_->print_job.state()),
@@ -272,7 +354,10 @@ bool AirPrintProbe::feed_print_body_(const uint8_t* data, size_t length) noexcep
                      ipp_request_error_name(request.error),
                      static_cast<unsigned>(request.status),
                      static_cast<unsigned>(request.attribute_count),
-                     static_cast<unsigned>(request.error_attribute_length),
+                     static_cast<int>(request.error_attribute_length),
+                     request.error_attribute != nullptr
+                         ? reinterpret_cast<const char*>(request.error_attribute)
+                         : "",
                      raster_decoder_error_name(state_->raster_backend.decoder_error()));
             return false;
         }
@@ -293,6 +378,10 @@ void AirPrintProbe::handle_abort_(HttpAbortReason reason) noexcept {
              state_ != nullptr
                  ? raster_decoder_error_name(state_->raster_backend.decoder_error())
                  : "no_state");
+    ESP_LOGW(kTag, "HTTP body summary: route=%u body_bytes=%llu ipp_prefix=%u",
+             static_cast<unsigned>(body_kind_),
+             static_cast<unsigned long long>(http_body_bytes_seen_),
+             static_cast<unsigned>(ipp_prefix_length_));
     if (state_ != nullptr &&
         (state_->print_job.state() == IppPrintStreamState::ReadingMetadata ||
          state_->print_job.state() == IppPrintStreamState::ReceivingDocument)) {
@@ -333,6 +422,10 @@ HttpResponse AirPrintProbe::print_response_() noexcept {
         response.body_length = sizeof(kError) - 1;
         return response;
     }
+    ESP_LOGI(kTag, "Print-Job IPP response: status=0x%04x bytes=%u job=%lu",
+             static_cast<unsigned>(status),
+             static_cast<unsigned>(state_->response_length),
+             static_cast<unsigned long>(state_->print_job.job().id));
     response.body = state_->response;
     response.body_length = state_->response_length;
     return response;
@@ -394,10 +487,36 @@ RasterDecoderError AirPrintProbe::begin_sink_(const RasterPageDescriptor& page) 
     }
     state_->page = page;
     state_->page_started = false;
+    state_->hal_config = PrintheadConfig{};
+    state_->hal_config.channel_count = 1;
+    state_->hal_config.pixel_bits = 8;
+    state_->hal_config.pixel_width = kMockWidthPx;
+    state_->hal_config.raster_layout = RasterLayout::Interleaved;
+    state_->hal_config.channel_order[0] = RasterChannel::Black;
+    state_->display_job_started = false;
+    const RasterChannel channels[4] = {
+        RasterChannel::Cyan, RasterChannel::Magenta,
+        RasterChannel::Yellow, RasterChannel::Black};
+    const uint32_t display_width =
+        state_->page.width_px > kAppleRasterMaxRowBytes / 4u
+            ? static_cast<uint32_t>(kAppleRasterMaxRowBytes / 4u)
+            : state_->page.width_px;
+    const uint32_t display_row_bytes = display_width * 4u;
+    const uint32_t page_dpi = state_->page.dpi_x != 0 ? state_->page.dpi_x : 300u;
+    const uint32_t display_width_um = static_cast<uint32_t>(
+        static_cast<uint64_t>(state_->page.width_px) * 25400u / page_dpi);
     state_->display_job_started = DisplayService::instance().begin_job(
-        kMockWidthPx, kMockHeightPx, 8u, 4u, kMockRowBytes,
-        nullptr, 0u, true, 4u, kMockWidthUm, kMockDpi) == Err::OK;
-    if (printhead_->begin(PrintheadConfig{kMockRowBytes, 200u, 0}) != Err::OK) {
+        display_width, state_->page.height_px, 8u, 4u, display_row_bytes,
+        channels, 4u, true, 4u, display_width_um, page_dpi, 32u) == Err::OK;
+    if (!state_->display_job_started) {
+        ESP_LOGW(kTag, "live preview unavailable for %ux%u; continue AirPrint job",
+                 static_cast<unsigned>(page.width_px),
+                 static_cast<unsigned>(page.height_px));
+    }
+    // AirPrint already converts the Mock output to monochrome K coverage.
+    // Submit that single channel rather than four interleaved CMYK channels;
+    // this keeps the same logical output while avoiding 3 empty-channel scans.
+    if (printhead_->begin(state_->hal_config) != Err::OK) {
         (void)printhead_->stop();
         finish_display_job_();
         return RasterDecoderError::BackendError;
@@ -413,60 +532,45 @@ RasterDecoderError AirPrintProbe::write_sink_(const uint8_t* data, size_t length
         printhead_ == nullptr) {
         return RasterDecoderError::BackendError;
     }
-    for (uint32_t pixel = 0; pixel < kMockWidthPx; ++pixel) {
-        const uint32_t source = static_cast<uint32_t>(
-            (static_cast<uint64_t>(pixel) * state_->page.width_px) / kMockWidthPx);
-        uint8_t gray = 0;
-        if (state_->page.pixel_format == RasterPixelFormat::RGB888) {
-            const size_t source_offset = static_cast<size_t>(source) * 3u;
-            const size_t safe_offset = source_offset + 2u < length ? source_offset :
-                                       length >= 3u ? length - 3u : 0u;
-            const uint8_t red = data[safe_offset];
-            const uint8_t green = data[safe_offset + 1u];
-            const uint8_t blue = data[safe_offset + 2u];
-            gray = static_cast<uint8_t>((77u * red + 150u * green + 29u * blue) >> 8);
-        } else if (state_->page.pixel_format == RasterPixelFormat::CMYK8888) {
-            const size_t source_offset = static_cast<size_t>(source) * 4u;
-            const size_t safe_offset = source_offset + 3u < length ? source_offset :
-                                       length >= 4u ? length - 4u : 0u;
-            const uint8_t cyan = data[safe_offset];
-            const uint8_t magenta = data[safe_offset + 1u];
-            const uint8_t yellow = data[safe_offset + 2u];
-            const uint8_t black = data[safe_offset + 3u];
-            const uint8_t red = static_cast<uint8_t>(255u -
-                (cyan > 255u - black ? 255u : cyan + black));
-            const uint8_t green = static_cast<uint8_t>(255u -
-                (magenta > 255u - black ? 255u : magenta + black));
-            const uint8_t blue = static_cast<uint8_t>(255u -
-                (yellow > 255u - black ? 255u : yellow + black));
-            gray = static_cast<uint8_t>((77u * red + 150u * green + 29u * blue) >> 8);
-        } else {
-            gray = data[source < length ? source : length - 1];
-        }
-        state_->cmyk_row[pixel * 4 + 0] = 0;
-        state_->cmyk_row[pixel * 4 + 1] = 0;
-        state_->cmyk_row[pixel * 4 + 2] = 0;
-        state_->cmyk_row[pixel * 4 + 3] = static_cast<uint8_t>(255u - gray);
+    const RasterDecoderError conversion = convert_apple_raster_row_to_mock(
+        state_->page, data, length,
+        state_->page.width_px > kAppleRasterMaxRowBytes / 4u
+            ? static_cast<uint32_t>(kAppleRasterMaxRowBytes / 4u)
+            : state_->page.width_px,
+        state_->display_cmyk_row, sizeof(state_->display_cmyk_row),
+        kMockWidthPx, state_->hal_gray_row, sizeof(state_->hal_gray_row));
+    if (conversion != RasterDecoderError::Ok) {
+        ESP_LOGE(kTag, "AirPrint row conversion failed: format=%u width=%u stride=%u len=%u error=%s",
+                 static_cast<unsigned>(state_->page.pixel_format),
+                 static_cast<unsigned>(state_->page.width_px),
+                 static_cast<unsigned>(state_->page.bytes_per_row),
+                 static_cast<unsigned>(length), raster_decoder_error_name(conversion));
+        return conversion;
     }
-    // AirPrint and IJPD now share the same visible-row boundary: the preview
-    // is updated immediately before the corresponding HAL submission.
-    const uint32_t output_begin = static_cast<uint32_t>(
+    const uint32_t hal_output_begin = static_cast<uint32_t>(
         (static_cast<uint64_t>(row_index) * kMockHeightPx) / state_->page.height_px);
-    const uint32_t output_end = static_cast<uint32_t>(
+    const uint32_t hal_output_end = static_cast<uint32_t>(
         (static_cast<uint64_t>(row_index + 1u) * kMockHeightPx) / state_->page.height_px);
-    for (uint32_t output_row = output_begin; output_row < output_end; ++output_row) {
-        DisplayService::instance().feed_row(output_row, state_->cmyk_row,
-                                            sizeof(state_->cmyk_row));
-        if (printhead_->submitRaster(state_->cmyk_row, sizeof(state_->cmyk_row),
+    for (uint32_t output_row = hal_output_begin; output_row < hal_output_end; ++output_row) {
+        if (printhead_->submitRaster(state_->hal_gray_row, sizeof(state_->hal_gray_row),
                                      RasterMeta{output_row}) != Err::OK) {
             return RasterDecoderError::BackendError;
         }
+    }
+    if (state_->display_job_started) {
+        const uint32_t display_width =
+            state_->page.width_px > kAppleRasterMaxRowBytes / 4u
+                ? static_cast<uint32_t>(kAppleRasterMaxRowBytes / 4u)
+                : state_->page.width_px;
+        DisplayService::instance().feed_row(row_index, state_->display_cmyk_row,
+                                            display_width * 4u);
     }
     return RasterDecoderError::Ok;
 }
 
 RasterDecoderError AirPrintProbe::end_sink_(RasterDecoderError status) noexcept {
     if (state_ != nullptr) state_->page_started = false;
+    if (status != RasterDecoderError::Ok) finish_display_job_();
     RasterDecoderError result = status;
     if (printhead_ == nullptr) {
         finish_display_job_();
@@ -498,6 +602,7 @@ void AirPrintProbe::finish_display_job_() noexcept {
     DisplayService::instance().end_job();
     state_->display_job_started = false;
 }
+
 
 }  // namespace airprint
 }  // namespace ijpd

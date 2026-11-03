@@ -61,8 +61,12 @@ private:
     static void tcp_feed(void* user, int ch, const uint8_t* data, size_t len) noexcept;
     static void tcp_tick(void* user) noexcept;
     static void service_tick_task_(void* user) noexcept;
-    static void airprint_start_task_(void* user) noexcept;
     void tick_services_() noexcept;
+#if defined(IJPD_AIRPRINT_ENABLED)
+    static void airprint_start_task_(void* user) noexcept;
+    void queue_airprint_start_() noexcept;
+    void start_airprint_mdns_if_ready_() noexcept;
+#endif
     static void tcp_channel_closed(void* user, int ch) noexcept;
     static void tcp_register_sink(void* user, int ch, void* sink_user,
                                   ControlTcpServer::SendFn send) noexcept;
@@ -102,8 +106,10 @@ private:
     bool mdns_started_ = false;  // Wi-Fi 就绪后惰性启动(tcp_tick 重试)
 #if defined(IJPD_AIRPRINT_ENABLED)
     volatile bool airprint_started_ = false;
+    bool airprint_mdns_started_ = false;
     volatile bool airprint_start_queued_ = false;
-    volatile bool airprint_start_attempted_ = false;
+    uint64_t airprint_retry_after_ms_ = 0;
+    uint64_t airprint_mdns_retry_after_ms_ = 0;
 #endif
     volatile bool service_tick_running_ = false;
 };

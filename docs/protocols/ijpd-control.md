@@ -165,7 +165,7 @@ JSON UTF-8 body + ASCII '#'
 ### 5.2 `start_provisioning`
 
 请求设备切换到独立的 SoftAP 配网门户。该命令不依赖 AirPrint；默认固件和
-AirPrint probe 都可提供。只有在没有活动打印任务、数据传输或 RAW 任务时才允许。
+`AIRPRINT_ENABLE=OFF` 精简固件都可提供。只有在没有活动打印任务、数据传输或 RAW 任务时才允许。
 
 请求：
 

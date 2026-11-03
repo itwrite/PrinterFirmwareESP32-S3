@@ -1,9 +1,8 @@
 // ============================================================================
 // airprint_probe.h - Opt-in AirPrint query and Print-Job service.
 //
-// Opt-in AirPrint HTTP service. Query-only mode remains available when no
-// printhead is supplied; the explicit print mode streams image/urf into the
-// validated host/core bridge.
+// AirPrint HTTP service. Query-only mode remains available when no printhead
+// is supplied; print mode streams image/urf into the validated host/core bridge.
 // ============================================================================
 #ifndef IJPD_AIRPRINT_ESP_AIRPRINT_PROBE_H
 #define IJPD_AIRPRINT_ESP_AIRPRINT_PROBE_H
@@ -26,9 +25,12 @@ public:
               const AirPrintCapabilities& capabilities,
               IPrintheadHal* printhead = nullptr,
               bool accept_print_jobs = false) noexcept;
+    Err start_mdns(const char* hostname, const char* device_id) noexcept;
     void stop() noexcept;
 
     bool started() const noexcept { return started_; }
+    bool http_task_running() const noexcept { return http_.task_running(); }
+    bool mdns_started() const noexcept { return mdns_.started(); }
     bool has_active_job() const noexcept;
 
 private:
@@ -69,6 +71,8 @@ private:
     BodyKind body_kind_ = BodyKind::Unknown;
     uint8_t ipp_prefix_[4] = {};
     size_t ipp_prefix_length_ = 0;
+    uint64_t http_body_bytes_seen_ = 0;
+    uint64_t http_body_log_threshold_ = 64u * 1024u;
     bool started_ = false;
 };
 

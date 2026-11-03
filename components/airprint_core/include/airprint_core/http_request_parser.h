@@ -16,6 +16,7 @@ namespace airprint {
 inline constexpr size_t kHttpMaxHeaderBytes = 8192;
 inline constexpr size_t kHttpMaxHeaderLineBytes = 1024;
 inline constexpr size_t kHttpMaxHeaders = 32;
+inline constexpr size_t kHttpSocketBufferBytes = 8192;
 
 struct HttpStringView {
     const char* data = nullptr;
@@ -88,6 +89,7 @@ class HttpRequestParser {
 public:
     explicit HttpRequestParser(const HttpParserLimits& limits = {}) noexcept;
 
+    void configure(const HttpParserLimits& limits) noexcept;
     void reset() noexcept;
     HttpFeedResult feed(const uint8_t* data, size_t length) noexcept;
 

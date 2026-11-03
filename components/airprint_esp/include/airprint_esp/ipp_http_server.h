@@ -1,9 +1,9 @@
 // ============================================================================
-// ipp_http_server.h - Opt-in bounded HTTP transport for IPP.
+// ipp_http_server.h - Bounded HTTP transport for IPP.
 //
 // This transport intentionally has no IPP operation logic. It validates the
 // HTTP envelope, streams body chunks to a Host, then serializes one response.
-// It is not started by the default application.
+// The default application starts it when Wi-Fi/SoftAP networking is ready.
 // ============================================================================
 #ifndef IJPD_AIRPRINT_ESP_IPP_HTTP_SERVER_H
 #define IJPD_AIRPRINT_ESP_IPP_HTTP_SERVER_H
@@ -54,6 +54,7 @@ public:
     void stop() noexcept;
 
     bool running() const noexcept { return running_; }
+    bool task_running() const noexcept { return task_ != nullptr; }
     uint16_t port() const noexcept { return port_; }
 
     IppHttpServer() noexcept = default;
@@ -76,10 +77,9 @@ private:
     int listener_ = -1;
     uint16_t port_ = 0;
     Host host_{};
-    // Keep the bounded parser and socket buffer out of the 8 KiB HTTP task
-    // stack. The parser owns an 8 KiB header buffer by design.
+    // Keep parser and socket buffers in the server object, not on the task stack.
     HttpRequestParser parser_{};
-    uint8_t socket_buffer_[2048] = {};
+    uint8_t socket_buffer_[kHttpSocketBufferBytes] = {};
     volatile bool running_ = false;
     TaskHandle_t task_ = nullptr;
 };

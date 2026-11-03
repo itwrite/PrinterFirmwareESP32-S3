@@ -22,8 +22,9 @@ struct PrinterServices {
     bool airprint = false;
 };
 
-// Explicit settings for the opt-in AirPrint service. These values are never
-// inferred from a PrintProfile and are ignored by the default build.
+// Explicit settings for the AirPrint service. These values are never inferred
+// from a PrintProfile. The standard firmware image enables the service;
+// AIRPRINT_ENABLE=OFF removes its implementation from the build.
 struct AirPrintConfig {
     uint16_t port = 631;
     bool accept_print_jobs = false;

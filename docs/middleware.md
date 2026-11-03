@@ -170,9 +170,8 @@ python3 tools/send_job.py --host <IP> --bytes 120000 --packets 30 --pattern mixe
 
 ## 7. 默认固件当前明确不支持
 
-- 默认 app 集成的 IPP/AirPrint 打印链路。仓库中的 opt-in AirPrint Core/transport
-  已有经真实样本验证的 host Apple Raster Mono8/SW decoder 子集，但仍缺少默认
-  app 集成和硬件 backend bridge。
+- 默认 app 集成的 IPP/AirPrint 打印链路。默认镜像已集成受限 AirPrint Core/transport
+  和 logical Mock backend；不提供 PDF，也未接入真实喷头电气 backend。
 - PDF、Apple Raster 等文档转换。
 - 默认镜像的 IJPD `start_print.mode="escpos"` 完整数据路径。
 - 未提供硬件资料时的真实喷头点火。

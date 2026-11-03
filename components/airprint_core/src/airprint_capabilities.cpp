@@ -99,6 +99,19 @@ IppError add_media_default(IppWriter& writer, const char* media) noexcept {
     return writer.end_collection();
 }
 
+IppError add_media_collection(IppWriter& writer, const char* name,
+                              const char* media) noexcept {
+    if (name == nullptr || media == nullptr || media[0] == '\0' ||
+        writer.begin_collection(name) != IppError::Ok ||
+        writer.add_collection_member_name("media-keyword") != IppError::Ok ||
+        writer.add_continuation(IppValueTag::Keyword,
+                                reinterpret_cast<const uint8_t*>(media),
+                                std::strlen(media)) != IppError::Ok) {
+        return IppError::InvalidArgument;
+    }
+    return writer.end_collection();
+}
+
 IppError add_printer_attributes(IppWriter& writer, const IppRequest& request,
                                 const AirPrintCapabilities& capabilities) noexcept {
     const int32_t query_operations[] = {
@@ -121,6 +134,7 @@ IppError add_printer_attributes(IppWriter& writer, const IppRequest& request,
     const char* const colors[] = {"monochrome", "color"};
     const char* const printer_reasons[] = {"none"};
     const char* const media[] = {capabilities.media_keyword};
+    const char* const media_col_supported[] = {"media-keyword"};
 
     IppError error = IppError::Ok;
     if (requested_attribute(request, "operations-supported")) {
@@ -217,6 +231,19 @@ IppError add_printer_attributes(IppWriter& writer, const IppRequest& request,
     if (error == IppError::Ok && requested_attribute(request, "media-col-default")) {
         error = add_media_default(writer, capabilities.media_keyword);
     }
+    if (error == IppError::Ok && requested_attribute(request, "media-col-ready")) {
+        error = add_media_collection(writer, "media-col-ready",
+                                    capabilities.media_keyword);
+    }
+    if (error == IppError::Ok && requested_attribute(request, "media-col-database")) {
+        error = add_media_collection(writer, "media-col-database",
+                                    capabilities.media_keyword);
+    }
+    if (error == IppError::Ok && requested_attribute(request, "media-col-supported")) {
+        error = add_keyword_values(writer, "media-col-supported", media_col_supported,
+                                   sizeof(media_col_supported) /
+                                       sizeof(media_col_supported[0]));
+    }
     if (error == IppError::Ok && requested_attribute(request, "urf-supported")) {
         error = add_urf_values(writer, capabilities.urf_supported);
     }
@@ -305,8 +332,10 @@ AirPrintResponseError build_get_printer_attributes_response(
         writer.add_cstr(IppValueTag::Charset, "attributes-charset", "utf-8") !=
             IppError::Ok ||
         writer.add_cstr(IppValueTag::NaturalLanguage,
-                        "attributes-natural-language", "en") != IppError::Ok ||
-        writer.begin_group(IppGroupTag::PrinterAttributes) != IppError::Ok) {
+                        "attributes-natural-language", "en") != IppError::Ok) {
+        return AirPrintResponseError::OutputTooSmall;
+    }
+    if (writer.begin_group(IppGroupTag::PrinterAttributes) != IppError::Ok) {
         return AirPrintResponseError::OutputTooSmall;
     }
     const IppError attributes = add_printer_attributes(writer, request, capabilities);

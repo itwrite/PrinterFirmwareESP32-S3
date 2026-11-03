@@ -10,6 +10,8 @@
 #include "esp_timer.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
+#include "esp_log.h"
+#include "platform_esp/log_adapter.h"
 
 namespace ijpd {
 namespace airprint {
@@ -17,7 +19,7 @@ namespace {
 
 constexpr uint32_t kClientIdleTimeoutMs = 15000;
 constexpr uint32_t kSelectTimeoutMs = 100;
-constexpr size_t kSocketBufferBytes = 2048;
+constexpr const char* kTag = "ipp_http";
 
 uint64_t now_ms() noexcept {
     return static_cast<uint64_t>(esp_timer_get_time() / 1000);
@@ -73,7 +75,7 @@ Err IppHttpServer::start(uint16_t port, const Host& host,
         return Err::INVALID_ARGUMENT;
     }
     host_ = host;
-    parser_ = HttpRequestParser(limits);
+    parser_.configure(limits);
     port_ = port;
     listener_ = lwip_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (listener_ < 0) return Err::OUT_OF_MEMORY;
@@ -99,6 +101,7 @@ Err IppHttpServer::start(uint16_t port, const Host& host,
         listener_ = -1;
         return Err::OUT_OF_MEMORY;
     }
+    ESP_LOGI(kTag, "listening on TCP %u", static_cast<unsigned>(port));
     return Err::OK;
 }
 
@@ -134,6 +137,8 @@ void IppHttpServer::run_() noexcept {
         const int fd = lwip_accept(listener_, reinterpret_cast<sockaddr*>(&peer),
                                    &peer_length);
         if (fd < 0) continue;
+        ESP_LOGI(kTag, "TCP client connected from port %u",
+                 static_cast<unsigned>(ntohs(peer.sin_port)));
         const int flags = fcntl(fd, F_GETFL, 0);
         (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
         handle_client_(fd);
@@ -167,7 +172,8 @@ void IppHttpServer::handle_client_(int fd) noexcept {
             (void)send_simple_(fd, 408, nullptr, "request timeout");
             return;
         }
-        const ssize_t received = lwip_recv(fd, buffer, kSocketBufferBytes, MSG_DONTWAIT);
+        const ssize_t received = lwip_recv(fd, buffer, kHttpSocketBufferBytes,
+                                           MSG_DONTWAIT);
         if (received == 0) {
             abort_request(HttpAbortReason::PeerClosed);
             return;
@@ -183,6 +189,9 @@ void IppHttpServer::handle_client_(int fd) noexcept {
             const HttpFeedResult result = parser.feed(buffer + offset,
                                                       static_cast<size_t>(received) - offset);
             if (result.event == HttpFeedEvent::Error) {
+                ESP_LOGW(kTag, "HTTP parse rejected: %s consumed=%u",
+                         http_parser_error_name(result.error),
+                         static_cast<unsigned>(result.consumed));
                 abort_request(HttpAbortReason::ParserError);
                 (void)send_simple_(fd, 400, nullptr, http_parser_error_name(result.error));
                 return;
@@ -193,9 +202,20 @@ void IppHttpServer::handle_client_(int fd) noexcept {
             }
             if (result.event == HttpFeedEvent::HeadersComplete) {
                 offset += result.consumed;
+                ESP_LOGI(kTag, "HTTP headers received: method=%.*s target=%.*s",
+                         static_cast<int>(parser.head().method.length),
+                         parser.head().method.data,
+                         static_cast<int>(parser.head().target.length),
+                         parser.head().target.data);
                 uint16_t status = 200;
                 const char* reason = nullptr;
                 if (!valid_head_(parser.head(), &status, &reason)) {
+                    ESP_LOGW(kTag, "HTTP request rejected: status=%u method=%.*s target=%.*s",
+                             static_cast<unsigned>(status),
+                             static_cast<int>(parser.head().method.length),
+                             parser.head().method.data,
+                             static_cast<int>(parser.head().target.length),
+                             parser.head().target.data);
                     abort_request(HttpAbortReason::ParserError);
                     (void)send_simple_(fd, status, reason, "invalid ipp http request");
                     return;
@@ -239,7 +259,10 @@ void IppHttpServer::handle_client_(int fd) noexcept {
     }
     request_complete = true;
     const HttpResponse response = host_.on_complete(host_.user);
-    (void)send_response_(fd, response);
+    const bool sent = send_response_(fd, response);
+    IJPD_LOGI(kTag, "HTTP response sent=%s status=%u bytes=%u",
+              sent ? "yes" : "no", static_cast<unsigned>(response.status_code),
+              static_cast<unsigned>(response.body_length));
 }
 
 bool IppHttpServer::wait_readable_(int fd, uint32_t timeout_ms) noexcept {

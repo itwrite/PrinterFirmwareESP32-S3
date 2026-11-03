@@ -161,6 +161,15 @@ private:
     bool page_started_ = false;
 };
 
+// Convert one decoded Apple Raster row to the fixed-width CMYK8/monochrome
+// logical Mock contract. Source pages may be wider or narrower than the Mock;
+// the row is nearest-neighbor resampled without allocating a page-sized buffer.
+RasterDecoderError convert_apple_raster_row_to_mock(
+    const RasterPageDescriptor& page, const uint8_t* source, size_t source_length,
+    uint32_t preview_width, uint8_t* cmyk_row, size_t cmyk_capacity,
+    uint32_t black_width,
+    uint8_t* black_row, size_t black_capacity) noexcept;
+
 }  // namespace airprint
 }  // namespace ijpd
 

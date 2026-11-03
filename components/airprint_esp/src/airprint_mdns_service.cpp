@@ -4,11 +4,14 @@
 #include <cstring>
 
 #include "esp_err.h"
+#include "esp_log.h"
 #include "mdns.h"
 
 namespace ijpd {
 namespace airprint {
 namespace {
+
+constexpr const char* kTag = "airprint_mdns";
 
 Err map_mdns_error(esp_err_t error) noexcept {
     return error == ESP_ERR_NO_MEM ? Err::OUT_OF_MEMORY : Err::INTERNAL_ERROR;
@@ -40,18 +43,18 @@ Err AirPrintMdnsService::start(const char* hostname, const char* device_id,
     }
     const esp_err_t add = mdns_service_add(instance_name_, "_ipp", "_tcp", record.port,
                                            txt, record.txt_count);
-    if (add != ESP_OK) return map_mdns_error(add);
-
-    // iOS 16+ uses this subtype for AirPrint discovery. It points to the same
-    // _ipp._tcp instance and must not be registered as a second service.
-    const esp_err_t subtype = mdns_service_subtype_add_for_host(
-        instance_name_, "_ipp", "_tcp", nullptr, "_universal");
-    if (subtype != ESP_OK) {
-        (void)mdns_service_remove_for_host(instance_name_, "_ipp", "_tcp", nullptr);
-        return map_mdns_error(subtype);
+    if (add != ESP_OK) {
+        ESP_LOGE(kTag, "_ipp._tcp registration failed: %s", esp_err_to_name(add));
+        return map_mdns_error(add);
     }
 
+    // Keep only the canonical AirPrint queue. Some iOS/PrintKit versions show
+    // the canonical browse result and its universal subtype as separate rows.
+    (void)mdns_service_subtype_remove_for_host(instance_name_, "_ipp", "_tcp",
+                                               nullptr, "_universal");
     started_ = true;
+    ESP_LOGI(kTag, "published canonical _ipp._tcp queue on port %u",
+             static_cast<unsigned>(record.port));
     return Err::OK;
 }
 
